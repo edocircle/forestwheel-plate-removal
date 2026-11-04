@@ -110,6 +110,26 @@ def cmd_sync(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Start the FastAPI review web application via Uvicorn."""
+    import uvicorn
+
+    from fwphotos.review_app import create_review_app
+
+    settings = load_settings(Path(args.config))
+    app_cfg = settings.get("review_app", {})
+    host = str(args.host or app_cfg.get("host", "127.0.0.1"))
+    port = int(args.port or app_cfg.get("port", 8000))
+
+    app = create_review_app(
+        config_path=Path(args.config),
+        review_dir_override=Path(args.review) if args.review else None,
+        output_dir_override=Path(args.output) if args.output else None,
+    )
+    uvicorn.run(app, host=host, port=port, log_level="info")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -175,6 +195,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sync car folders from Google Drive via rclone, run pipeline on ready cars, and push results",
     )
     sync_parser.set_defaults(func=cmd_sync)
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Run the FastAPI review web app for approving or rejecting photos in review/",
+    )
+    serve_parser.add_argument("--host", required=False, help="Bind host (default from config)")
+    serve_parser.add_argument("--port", type=int, required=False, help="Bind port (default from config)")
+    serve_parser.add_argument("--review", required=False, help="Override review directory")
+    serve_parser.add_argument("--output", required=False, help="Override output directory")
+    serve_parser.set_defaults(func=cmd_serve)
 
     return parser
 

@@ -1,0 +1,27 @@
+[Unit]
+Description=Forest Wheel Photo Pipeline FastAPI Review Web App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fwphotos
+Group=fwphotos
+WorkingDirectory=/opt/forestwheel-plateremoval
+# Basic Auth credentials (FW_REVIEW_USER, FW_REVIEW_PASS) and Telegram env vars live in
+# /etc/fwphotos/fwphotos.env (permissions 0600, never committed to git).
+EnvironmentFile=/etc/fwphotos/fwphotos.env
+ExecStart=/opt/forestwheel-plateremoval/.venv/bin/python -m fwphotos.cli --config /opt/forestwheel-plateremoval/config/settings.yaml serve --host 127.0.0.1 --port 8000 --review /srv/fw/review --output /srv/fw/output
+Restart=on-failure
+RestartSec=5s
+Nice=5
+ProtectSystem=strict
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/srv/fw /opt/forestwheel-plateremoval/data /opt/forestwheel-plateremoval/models
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fwphotos-review
+
+[Install]
+WantedBy=multi-user.target

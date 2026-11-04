@@ -53,7 +53,25 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now fwphotos-sync.timer
 ```
 
-### 4. Tests
+### 4. Review Web App (FastAPI + Basic Auth + Caddy) (Phase 5)
+Mobile and iPad friendly web interface showing each car in `review/` with Before/After thumbnails, the logged reason, and **Approve** / **Reject** buttons. Requires `FW_REVIEW_USER` and `FW_REVIEW_PASS` environment variables (never exposes photos without authentication):
+
+```bash
+export FW_REVIEW_USER="admin"
+export FW_REVIEW_PASS="your-strong-password"
+python -m fwphotos.cli serve --host 127.0.0.1 --port 8000
+```
+
+To deploy with systemd and Caddy (`photos.forestwheel.com` with automatic HTTPS):
+```bash
+sudo cp deploy/systemd/fwphotos-review.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fwphotos-review.service
+sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+### 5. Tests
 ```bash
 pytest -q
 ```
