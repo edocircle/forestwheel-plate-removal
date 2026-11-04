@@ -36,3 +36,31 @@ output:
   active_profile: "website"
   jpeg_quality: 92
 
+sync:
+  rclone_binary: "rclone"
+  remote_name: "gdrive"
+  remote_inbox: "Forest Wheel Inventory/inbox"
+  remote_processed: "Forest Wheel Inventory/processed"
+  remote_review: "Forest Wheel Inventory/review"
+  local_inbox_dir: "/srv/fw/inbox"
+  local_output_dir: "/srv/fw/output"
+  local_review_dir: "/srv/fw/review"
+  car_state_file: "/srv/fw/state/synced_cars.json"
+  ready_marker_file: "ready.txt"
+  quiescence_seconds: 90
+  rclone_timeout_seconds: 600
+  skip_video_extensions:
+    - ".mp4"
+    - ".mov"
+    - ".avi"
+    - ".mkv"
+    - ".m4v"
+    - ".webm"
+    - ".3gp"
+  telegram:
+    enabled: true
+    bot_token_env: "FW_TELEGRAM_BOT_TOKEN"
+    chat_id_env: "FW_TELEGRAM_CHAT_ID"
+    timeout_seconds: 10
+
+

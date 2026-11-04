@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Forest Wheel Photo Pipeline Sync Every 2 Minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+Persistent=true
+Unit=fwphotos-sync.service
+
+[Install]
+WantedBy=timers.target

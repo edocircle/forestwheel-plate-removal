@@ -1,0 +1,24 @@
+[Unit]
+Description=Forest Wheel Photo Pipeline Google Drive Sync & Processing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fwphotos
+Group=fwphotos
+WorkingDirectory=/opt/forestwheel-plateremoval
+# Telegram credentials (FW_TELEGRAM_BOT_TOKEN, FW_TELEGRAM_CHAT_ID) are loaded from
+# /etc/fwphotos/fwphotos.env (permissions 0600, never committed to git).
+EnvironmentFile=-/etc/fwphotos/fwphotos.env
+ExecStart=/opt/forestwheel-plateremoval/.venv/bin/python -m fwphotos.cli --config /opt/forestwheel-plateremoval/config/settings.yaml sync
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+ProtectSystem=strict
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/srv/fw /opt/forestwheel-plateremoval/models
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fwphotos-sync

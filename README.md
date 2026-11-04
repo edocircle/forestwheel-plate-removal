@@ -36,7 +36,24 @@ Runs detection, plate overlay, and template composition. Images with at least on
 python -m fwphotos.cli run --input data/test_photos --output data/output --review data/review
 ```
 
-### 3. Tests
+### 3. Google Drive Sync (`rclone`) & Systemd Timer (Phase 4)
+Copies new car folders from `gdrive:"Forest Wheel Inventory/inbox"` to `/srv/fw/inbox`, waits for `ready.txt` or 90 seconds of file quiescence, processes each car folder into `/srv/fw/output/<car-id>` and `/srv/fw/review/<car-id>`, pushes results back to `gdrive:"Forest Wheel Inventory/processed"` and `.../review`, and sends Telegram alerts on errors:
+
+```bash
+export FW_TELEGRAM_BOT_TOKEN="your-bot-token"
+export FW_TELEGRAM_CHAT_ID="your-chat-id"
+python -m fwphotos.cli sync
+```
+
+To install the systemd service and 2-minute timer on Ubuntu (as non-root user `fwphotos`):
+```bash
+sudo cp deploy/systemd/fwphotos-sync.service /etc/systemd/system/
+sudo cp deploy/systemd/fwphotos-sync.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fwphotos-sync.timer
+```
+
+### 4. Tests
 ```bash
 pytest -q
 ```

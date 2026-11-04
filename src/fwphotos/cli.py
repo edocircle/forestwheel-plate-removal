@@ -98,6 +98,18 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Execute one Google Drive rclone sync and per-car processing cycle."""
+    from fwphotos.sync import sync_once
+
+    try:
+        sync_once(config_path=Path(args.config))
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Sync cycle failed: %s", exc)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -157,6 +169,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-process images even if already recorded in state file",
     )
     run_parser.set_defaults(func=cmd_run)
+
+    sync_parser = subparsers.add_parser(
+        "sync",
+        help="Sync car folders from Google Drive via rclone, run pipeline on ready cars, and push results",
+    )
+    sync_parser.set_defaults(func=cmd_sync)
 
     return parser
 
