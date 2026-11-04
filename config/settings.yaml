@@ -1,0 +1,38 @@
+# Forest Wheel Photo Pipeline Configuration
+
+paths:
+  input_dir: "data/test_photos"
+  output_dir: "data/output"
+  review_dir: "data/review"
+  debug_dir: "data/debug"
+  state_file: "data/processed_state.json"
+  template_config: "config/template.yaml"
+  plate_overlay_asset: "assets/plate_overlay.png"
+  logo_asset: "assets/logo.png"
+
+detection:
+  weights_path: "models/plate_yolov8n.pt"
+  weights_url: "https://huggingface.co/Koushim/yolov8-license-plate-detection/resolve/main/best.pt"
+  confidence_threshold: 0.40
+  max_inference_size: 1280
+  device: "cpu"
+  supported_extensions:
+    - ".jpg"
+    - ".jpeg"
+    - ".png"
+    - ".heic"
+
+overlay:
+  padding_ratio: 0.08
+  min_padding_px: 4
+  feather_px: 5
+  canny_low: 50
+  canny_high: 150
+  approx_poly_epsilon: 0.04
+  min_quad_area_ratio: 0.25
+  max_quad_area_ratio: 0.98
+
+output:
+  active_profile: "website"
+  jpeg_quality: 92
+

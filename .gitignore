@@ -1,0 +1,43 @@
+# Python & Virtualenv
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.egg
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data, Photos, & State (Never commit photos or outputs)
+data/
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.HEIC
+*.webp
+!assets/plate_overlay.png
+!assets/logo.png
+
+# Model weights (Never commit weights)
+models/
+*.pt
+*.onnx
+*.pth
+*.weights
+
+# Secrets, Credentials, & Configs (Never commit)
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+client_secret*.json
+token.json
+rclone.conf
+*rclone*.conf
+
