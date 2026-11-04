@@ -98,7 +98,7 @@ def test_authenticated_dashboard_and_before_after_thumbnails(tmp_path: Path) -> 
     assert resp.status_code == 200
     assert "SBA8888X" in resp.text
     assert "01_rear_angle.jpg" in resp.text
-    assert "low_confidence (0.3500 &lt; 0.4000)" in resp.text
+    assert "low_confidence (0.3500 < 0.4000)" in resp.text
     assert "no_plate_detected" in resp.text
 
     before_resp = client.get("/media/before/SBA8888X/01_rear_angle.jpg", auth=auth)
@@ -143,3 +143,68 @@ def test_approve_moves_to_output_and_reject_marks_rejected_in_review(
     assert len(remaining) == 1
     assert remaining[0]["filename"] == "02_interior.jpg"
     assert remaining[0]["status"] == "rejected"
+
+
+def test_multi_file_upload_and_aspect_ratio_crops(tmp_path: Path) -> None:
+    """POST /api/upload processes multiple files and serves 1:1, 16:9, and 9:16 template crops."""
+    client, _, output_dir, _ = _setup_review_fixture(tmp_path)
+    auth = ("reviewer", "s3cr3t-pass")
+
+    # Create two synthetic JPEG images in memory
+    img = np.full((240, 360, 3), (45, 90, 65), dtype=np.uint8)
+    cv2.rectangle(img, (40, 40), (140, 80), (245, 245, 245), -1)
+    _, jpg_buf = cv2.imencode(".jpg", img)
+    jpg_bytes = jpg_buf.tobytes()
+
+    # Use a high-confidence detector stub for upload
+    class _HighConfDetector(PlateDetector):
+        def __init__(self) -> None:
+            super().__init__(weights_path=Path("models/dummy.pt"), confidence_threshold=0.40)
+
+        def detect_array(
+            self, image_bgr: np.ndarray, min_conf: float | None = None
+        ) -> list[Detection]:
+            return [Detection(bbox=(40, 40, 140, 80), confidence=0.95)]
+
+    app = create_review_app(
+        config_path=Path("config/settings.yaml"),
+        review_dir_override=tmp_path / "review2",
+        output_dir_override=output_dir,
+        inbox_dir_override=tmp_path / "inbox2",
+        decisions_file_override=tmp_path / "decisions2.json",
+        state_file_override=tmp_path / "state2.json",
+        detector=_HighConfDetector(),
+        env={"FW_REVIEW_USER": "reviewer", "FW_REVIEW_PASS": "s3cr3t-pass"},
+    )
+    upload_client = TestClient(app)
+
+    files = [
+        ("files", ("front_view.jpg", jpg_bytes, "image/jpeg")),
+        ("files", ("rear_view.jpg", jpg_bytes, "image/jpeg")),
+    ]
+    up_resp = upload_client.post(
+        "/api/upload",
+        data={"car_id": "FW-2026-GT3", "ratio": "16:9"},
+        files=files,
+        auth=auth,
+    )
+    assert up_resp.status_code == 200
+    payload = up_resp.json()
+    assert payload["car_id"] == "FW-2026-GT3"
+    assert payload["processed_count"] == 2
+    assert payload["output_count"] == 2
+
+    # Verify 1:1, 16:9, and 9:16 crops can be fetched via /media/output/ and /api/export/
+    for ratio in ("1:1", "16:9", "9:16"):
+        media_resp = upload_client.get(
+            f"/media/output/FW-2026-GT3/front_view.jpg?ratio={ratio}&download=1",
+            auth=auth,
+        )
+        assert media_resp.status_code == 200
+        assert media_resp.content[:2] == b"\xff\xd8"
+
+    zip_resp = upload_client.get("/api/export/FW-2026-GT3?ratio=9:16", auth=auth)
+    assert zip_resp.status_code == 200
+    assert zip_resp.headers["content-type"] == "application/zip"
+
+

@@ -180,8 +180,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--profile",
         required=False,
-        choices=["website", "social_4_5"],
-        help="Override template output profile (website or social_4_5)",
+        choices=["ratio_1_1", "ratio_16_9", "ratio_9_16", "website", "social_4_5"],
+        help="Override template output profile (ratio_1_1, ratio_16_9, ratio_9_16, website, or social_4_5)",
     )
     run_parser.add_argument(
         "--force",

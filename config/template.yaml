@@ -1,8 +1,109 @@
 # Forest Wheel Template Layout Configuration
-# Supports two output profiles: "website" (4:3 listing) and "social_4_5" (4:5 portrait)
+# Supports 1:1 (Square), 16:9 (Widescreen), 9:16 (Vertical Story), website (4:3), and social_4_5 (4:5)
 
 profiles:
+  ratio_1_1:
+    label: "Square (1:1)"
+    ratio_tag: "1:1"
+    canvas_size: [1080, 1080]
+    background_color: "#101412"
+    border:
+      enabled: true
+      width: 10
+      color: "#2D6A4F"
+      inset: 14
+    photo:
+      box: [28, 28, 1052, 956]
+      fit_mode: "cover"
+      background_color: "#181C1A"
+    logo:
+      enabled: true
+      path: "assets/logo.png"
+      position: [36, 974]
+      max_size: [240, 68]
+    text_fields:
+      - text: "FOREST WHEEL AUTOMOBILE"
+        position: [1040, 998]
+        anchor: "ra"
+        font_path: ""
+        font_size: 22
+        color: "#E0E3DF"
+      - text: "VERIFIED QUALITY PRE-OWNED • 1:1"
+        position: [1040, 1028]
+        anchor: "ra"
+        font_path: ""
+        font_size: 14
+        color: "#A5D0B9"
+
+  ratio_16_9:
+    label: "Widescreen (16:9)"
+    ratio_tag: "16:9"
+    canvas_size: [1920, 1080]
+    background_color: "#101412"
+    border:
+      enabled: true
+      width: 12
+      color: "#2D6A4F"
+      inset: 16
+    photo:
+      box: [32, 32, 1888, 956]
+      fit_mode: "cover"
+      background_color: "#181C1A"
+    logo:
+      enabled: true
+      path: "assets/logo.png"
+      position: [44, 974]
+      max_size: [280, 72]
+    text_fields:
+      - text: "FOREST WHEEL AUTOMOBILE"
+        position: [1872, 998]
+        anchor: "ra"
+        font_path: ""
+        font_size: 26
+        color: "#E0E3DF"
+      - text: "SINGAPORE QUALITY PRE-OWNED VEHICLES • 16:9"
+        position: [1872, 1030]
+        anchor: "ra"
+        font_path: ""
+        font_size: 16
+        color: "#A5D0B9"
+
+  ratio_9_16:
+    label: "Vertical Story (9:16)"
+    ratio_tag: "9:16"
+    canvas_size: [1080, 1920]
+    background_color: "#101412"
+    border:
+      enabled: true
+      width: 12
+      color: "#2D6A4F"
+      inset: 16
+    photo:
+      box: [32, 140, 1048, 1740]
+      fit_mode: "cover"
+      background_color: "#181C1A"
+    logo:
+      enabled: true
+      path: "assets/logo.png"
+      position: [380, 40]
+      max_size: [320, 80]
+    text_fields:
+      - text: "FOREST WHEEL AUTOMOBILE"
+        position: [540, 1796]
+        anchor: "mm"
+        font_path: ""
+        font_size: 28
+        color: "#E0E3DF"
+      - text: "SINGAPORE QUALITY PRE-OWNED • 9:16"
+        position: [540, 1838]
+        anchor: "mm"
+        font_path: ""
+        font_size: 18
+        color: "#A5D0B9"
+
   website:
+    label: "Website Listing (4:3)"
+    ratio_tag: "4:3"
     canvas_size: [1600, 1200]
     background_color: "#112219"
     border:
@@ -34,6 +135,8 @@ profiles:
         color: "#D4AF37"
 
   social_4_5:
+    label: "Social Portrait (4:5)"
+    ratio_tag: "4:5"
     canvas_size: [1080, 1350]
     background_color: "#112219"
     border:

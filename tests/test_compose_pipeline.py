@@ -46,6 +46,15 @@ def test_compose_template_website_and_social_profiles() -> None:
     social_img = compose_template(sample_bgr, template_cfg, profile_name="social_4_5")
     assert social_img.size == (1080, 1350)
 
+    ratio_1_1 = compose_template(sample_bgr, template_cfg, profile_name="ratio_1_1")
+    assert ratio_1_1.size == (1080, 1080)
+
+    ratio_16_9 = compose_template(sample_bgr, template_cfg, profile_name="ratio_16_9")
+    assert ratio_16_9.size == (1920, 1080)
+
+    ratio_9_16 = compose_template(sample_bgr, template_cfg, profile_name="ratio_9_16")
+    assert ratio_9_16.size == (1080, 1920)
+
     with pytest.raises(KeyError):
         compose_template(sample_bgr, template_cfg, profile_name="nonexistent")
 
@@ -117,3 +126,4 @@ def test_pipeline_failsafe_and_idempotency(tmp_path: Path) -> None:
     )
     assert len(records_second) == 3
     assert stub.call_count == calls_before
+
