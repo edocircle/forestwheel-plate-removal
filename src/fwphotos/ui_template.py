@@ -252,7 +252,13 @@ tailwind.config = {
 
         <!-- Default Frame Ratio for Batch -->
         <div>
-          <label class="block text-xs font-semibold text-on-surface-variant mb-2">Default Export Ratio</label>
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-xs font-semibold text-on-surface-variant">Output Aspect Ratio</label>
+            <button type="button" onclick="switchTab('frames')" class="text-[11px] font-semibold text-primary hover:underline flex items-center gap-0.5">
+              <span>Preset: <strong id="upload-active-preset-pill">Clean White • Fit</strong></span>
+              <span class="material-symbols-outlined text-[13px]">tune</span>
+            </button>
+          </div>
           <div class="grid grid-cols-3 gap-1.5 bg-surface-container p-1 rounded-2xl">
             <button type="button" onclick="setUploadRatio('1:1')" id="up-ratio-1:1" class="py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all">1:1</button>
             <button type="button" onclick="setUploadRatio('16:9')" id="up-ratio-16:9" class="py-2 rounded-xl text-xs font-bold bg-white text-primary shadow-sm transition-all">16:9</button>
@@ -443,12 +449,43 @@ tailwind.config = {
       </div>
     </div>
 
-    <!-- Right Column: Photo Angle Selector + Optional Caption + Save to Gallery / Export -->
+    <!-- Right Column: Plate Cover Upload + Photo Angle Selector + Optional Caption + Save Preset -->
     <div class="lg:col-span-4 space-y-6">
       <div class="apple-card-white rounded-[24px] p-6 space-y-5">
+        <!-- Custom Plate Cover Image Upload -->
+        <div class="space-y-3 pb-4 border-b border-surface-container">
+          <div class="flex items-center justify-between">
+            <div>
+              <h4 class="text-sm font-bold text-on-surface">Plate Cover Template</h4>
+              <p class="text-[11px] text-on-surface-variant">Upload the graphic/logo used to cover license plates</p>
+            </div>
+            <span id="overlay-status-badge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-fixed text-primary">Active</span>
+          </div>
+
+          <input id="plate-overlay-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/*" class="hidden" onchange="uploadCustomPlateOverlay(this.files)"/>
+
+          <div class="flex items-center gap-3 bg-surface-container-low p-3 rounded-2xl border border-outline-variant/30">
+            <div class="w-24 h-12 rounded-xl bg-white border border-outline-variant/40 flex items-center justify-center overflow-hidden shrink-0 p-1 shadow-xs">
+              <img id="plate-overlay-preview-img" src="/media/plate-overlay" alt="Plate Cover" class="max-h-full max-w-full object-contain"/>
+            </div>
+            <div class="flex-1 flex flex-col gap-1.5">
+              <button type="button" onclick="document.getElementById('plate-overlay-file-input').click()"
+                      class="w-full py-1.5 px-3 rounded-xl bg-primary text-white text-xs font-semibold hover:opacity-95 transition-all flex items-center justify-center gap-1">
+                <span class="material-symbols-outlined text-[15px]">upload</span>
+                <span>Upload Plate Cover</span>
+              </button>
+              <button type="button" onclick="resetCustomPlateOverlay()"
+                      class="w-full py-1 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant text-[11px] font-semibold transition-all">
+                Reset to Default
+              </button>
+            </div>
+          </div>
+          <p id="overlay-upload-feedback" class="text-[11px] text-emerald-700 font-medium hidden"></p>
+        </div>
+
         <!-- Angle / Photo Queue for Selected Car -->
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2.5">Pick a Photo</label>
+          <label class="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2.5">Preview Photo</label>
           <div id="frame-photo-strip" class="grid grid-cols-4 gap-2 max-h-44 overflow-y-auto p-1">
             <!-- Populated by JS -->
           </div>
@@ -461,7 +498,7 @@ tailwind.config = {
               <h4 class="text-sm font-bold text-on-surface">Showroom Caption</h4>
               <p class="text-[11px] text-on-surface-variant">Optional car model &amp; price badge</p>
             </div>
-            <input id="studio-caption-toggle" type="checkbox" checked onchange="refreshStudioCanvas()"
+            <input id="studio-caption-toggle" type="checkbox" checked onchange="saveGlobalFramePreset(true)"
                    class="w-5 h-5 rounded-md text-primary focus:ring-primary border-outline-variant"/>
           </div>
 
@@ -486,18 +523,25 @@ tailwind.config = {
           </div>
         </div>
 
-        <!-- Primary Action Buttons: Save to Gallery & Export -->
+        <!-- Primary Action Buttons: Apply Frame Config to All Uploads & Export -->
         <div class="pt-3 space-y-2.5">
-          <button type="button" onclick="saveStudioFrameToGallery()" id="btn-save-frame-gallery"
-                  class="w-full py-3.5 rounded-2xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-sm transition-all flex items-center justify-center gap-2">
-            <span class="material-symbols-outlined text-[19px] text-primary">bookmark_add</span>
-            <span>Save to Gallery</span>
+          <button type="button" onclick="saveGlobalFramePreset(false)" id="btn-save-frame-preset"
+                  class="w-full py-3.5 rounded-2xl bg-gradient-to-b from-primary-container to-primary text-white font-semibold text-sm shadow-lg shadow-primary/20 hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+            <span class="material-symbols-outlined text-[19px]">check_circle</span>
+            <span>Save as Default Upload Frame</span>
           </button>
-          <button type="button" onclick="exportStudioFrame()"
-                  class="w-full py-4 rounded-2xl bg-gradient-to-b from-primary-container to-primary text-white font-semibold text-sm shadow-lg shadow-primary/20 hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
-            <span class="material-symbols-outlined text-[19px]">ios_share</span>
-            <span>Export</span>
-          </button>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button type="button" onclick="saveStudioFrameToGallery()" id="btn-save-frame-gallery"
+                    class="py-3 rounded-2xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
+              <span class="material-symbols-outlined text-[17px] text-primary">bookmark_add</span>
+              <span>Save Copy</span>
+            </button>
+            <button type="button" onclick="exportStudioFrame()"
+                    class="py-3 rounded-2xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
+              <span class="material-symbols-outlined text-[17px] text-primary">ios_share</span>
+              <span>Export JPG</span>
+            </button>
+          </div>
           <p id="studio-save-feedback" class="text-[11px] text-center text-emerald-700 font-medium hidden"></p>
         </div>
       </div>
@@ -752,11 +796,81 @@ tailwind.config = {
       const res = await fetch('/api/state', { credentials: 'same-origin' });
       if (!res.ok) return;
       appState = await res.json();
+      if (appState.frame_config) {
+        syncUiWithFrameConfig(appState.frame_config);
+      }
       updateGalleryCountBadge();
       renderGallery();
       populateFrameStudioSelectors();
     } catch (err) {
       console.error('Error loading state:', err);
+    }
+  }
+
+  function syncUiWithFrameConfig(fcfg) {
+    if (!fcfg) return;
+    studioRatio = fcfg.ratio || studioRatio;
+    uploadRatio = fcfg.ratio || uploadRatio;
+    studioFitMode = fcfg.fit_mode || studioFitMode;
+    studioTemplate = fcfg.template_style || studioTemplate;
+    studioOffsetX = typeof fcfg.offset_x === 'number' ? fcfg.offset_x : studioOffsetX;
+    studioOffsetY = typeof fcfg.offset_y === 'number' ? fcfg.offset_y : studioOffsetY;
+
+    // Update Upload ratio buttons
+    ['1:1', '16:9', '9:16'].forEach(r => {
+      const btn = document.getElementById('up-ratio-' + r);
+      if (btn) {
+        btn.className = (r === uploadRatio)
+          ? 'py-2 rounded-xl text-xs font-bold bg-white text-primary shadow-sm transition-all'
+          : 'py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all';
+      }
+      const stBtn = document.getElementById('st-ratio-' + r);
+      if (stBtn) {
+        stBtn.className = (r === studioRatio)
+          ? 'px-4 py-1.5 rounded-lg text-xs font-bold bg-white text-primary shadow-sm transition-all'
+          : 'px-4 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all';
+      }
+    });
+
+    // Update Fit/Fill buttons
+    const fitBtn = document.getElementById('st-fit-fit');
+    const fillBtn = document.getElementById('st-fit-fill');
+    if (fitBtn && fillBtn) {
+      fitBtn.className = (studioFitMode === 'fit')
+        ? 'px-3.5 py-1.5 rounded-lg text-xs font-bold bg-white text-primary shadow-sm transition-all flex items-center gap-1.5'
+        : 'px-3.5 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all flex items-center gap-1.5';
+      fillBtn.className = (studioFitMode === 'fill')
+        ? 'px-3.5 py-1.5 rounded-lg text-xs font-bold bg-white text-primary shadow-sm transition-all flex items-center gap-1.5'
+        : 'px-3.5 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all flex items-center gap-1.5';
+    }
+
+    // Update Template cards
+    const tplLbl = document.getElementById('studio-active-template-label');
+    if (tplLbl) tplLbl.textContent = TEMPLATE_LABELS[studioTemplate] || studioTemplate;
+    Object.keys(TEMPLATE_LABELS).forEach(k => {
+      const b = document.getElementById('tpl-' + k);
+      if (b) {
+        b.className = (k === studioTemplate)
+          ? 'p-3 rounded-2xl border-2 border-primary bg-primary-fixed/15 text-left transition-all'
+          : 'p-3 rounded-2xl border border-outline-variant/40 hover:border-primary/50 bg-surface-container-low text-left transition-all';
+      }
+    });
+
+    const capToggle = document.getElementById('studio-caption-toggle');
+    if (capToggle && typeof fcfg.caption_enabled === 'boolean') {
+      capToggle.checked = fcfg.caption_enabled;
+    }
+
+    const presetPill = document.getElementById('upload-active-preset-pill');
+    if (presetPill) {
+      const tName = TEMPLATE_LABELS[studioTemplate] || 'Clean White';
+      const fName = studioFitMode === 'fill' ? 'Fill' : 'Fit (Blur)';
+      presetPill.textContent = `${tName} • ${fName} • ${studioRatio}`;
+    }
+
+    const ovBadge = document.getElementById('overlay-status-badge');
+    if (ovBadge) {
+      ovBadge.textContent = fcfg.has_custom_overlay ? 'Custom Cover' : 'Default Cover';
     }
   }
 
@@ -1019,16 +1133,24 @@ tailwind.config = {
     renderGallery();
   }
 
-  function getMediaUrlForPhoto(carId, photoObj, compareMode) {
+  function getMediaUrlForPhoto(carId, photoObj, compareMode, fullRes = false) {
     const fn = encodeURIComponent(photoObj.filename);
     const cid = encodeURIComponent(carId);
+    const fullParam = fullRes ? '&full=1' : '';
+    const activeRatio = encodeURIComponent(studioRatio || uploadRatio || '16:9');
     if (compareMode === 'before') {
-      return `/media/original/${cid}/${fn}`;
+      return `/media/original/${cid}/${fn}?full=${fullRes ? 1 : 0}`;
     }
     if (photoObj.status === 'ready') {
-      return `/media/clean/${cid}/${fn}`;
+      return `/media/output/${cid}/${fn}?ratio=${activeRatio}${fullParam}`;
     }
-    return `/media/after/${cid}/${fn}?ratio=16:9`;
+    return `/media/after/${cid}/${fn}?ratio=${activeRatio}${fullParam}`;
+  }
+
+  function openPhotoFullWindow(carId, filename, status, compareMode, ev) {
+    if (ev) ev.stopPropagation();
+    const url = getMediaUrlForPhoto(carId, { filename: filename, status: status }, compareMode, true);
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   function renderGallery() {
@@ -1188,7 +1310,10 @@ tailwind.config = {
       renderGallery();
       return;
     }
-    openCarDetailModal(carId);
+    const photos = getCarPhotos(carId);
+    const pObj = photos.find(p => p.filename === filename) || { filename: filename, status: 'ready' };
+    const mode = cardCompareModes[carId] || globalCompareMode;
+    openPhotoFullWindow(carId, filename, pObj.status, mode, ev);
   }
 
   // =========================================================================
@@ -1274,12 +1399,13 @@ tailwind.config = {
       const isReview = p.status !== 'ready';
       return `
         <div class="apple-card-white rounded-2xl overflow-hidden flex flex-col justify-between border border-outline-variant/30">
-          <div class="relative aspect-[4/3] bg-surface-container">
-            <img src="${imgUrl}" alt="${p.filename}" class="w-full h-full object-cover"/>
+          <div onclick="openPhotoFullWindow('${activeModalCarId}', '${p.filename}', '${p.status}', '${modalCompareMode}', event)"
+               class="relative aspect-[4/3] bg-surface-container cursor-zoom-in group" title="Click to open full image in new window">
+            <img src="${imgUrl}" alt="${p.filename}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/>
             <span class="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${modalCompareMode === 'before' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}">
               ${modalCompareMode === 'before' ? 'Original' : 'Plate Removed'}
             </span>
-            <button type="button" onclick="deleteSinglePhoto('${activeModalCarId}', '${p.filename}')"
+            <button type="button" onclick="event.stopPropagation(); deleteSinglePhoto('${activeModalCarId}', '${p.filename}')"
                     class="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-white/90 hover:bg-error hover:text-white text-error flex items-center justify-center shadow-sm transition-colors"
                     title="Delete this photo">
               <span class="material-symbols-outlined text-[18px]">delete</span>
@@ -1550,14 +1676,17 @@ tailwind.config = {
 
   function setStudioRatio(r) {
     studioRatio = r;
+    uploadRatio = r;
     ['1:1', '16:9', '9:16'].forEach(k => {
       const b = document.getElementById('st-ratio-' + k);
-      if (!b) return;
-      b.className = (k === r)
-        ? 'px-4 py-1.5 rounded-lg text-xs font-bold bg-white text-primary shadow-sm transition-all'
-        : 'px-4 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all';
+      if (b) {
+        b.className = (k === r)
+          ? 'px-4 py-1.5 rounded-lg text-xs font-bold bg-white text-primary shadow-sm transition-all'
+          : 'px-4 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all';
+      }
     });
     refreshStudioCanvas();
+    saveGlobalFramePreset(true);
   }
 
   function setStudioFitMode(mode) {
@@ -1571,6 +1700,7 @@ tailwind.config = {
 
     document.getElementById('studio-pan-hint').classList.toggle('hidden', mode !== 'fill');
     refreshStudioCanvas();
+    saveGlobalFramePreset(true);
   }
 
   const TEMPLATE_LABELS = {
@@ -1594,6 +1724,86 @@ tailwind.config = {
       }
     });
     refreshStudioCanvas();
+    saveGlobalFramePreset(true);
+  }
+
+  async function saveGlobalFramePreset(silent = false) {
+    const captionOn = document.getElementById('studio-caption-toggle')?.checked ?? true;
+    const model = document.getElementById('studio-model-input')?.value || '';
+    const price = document.getElementById('studio-price-input')?.value || '';
+    const specs = document.getElementById('studio-specs-input')?.value || '';
+    const fb = document.getElementById('studio-save-feedback');
+
+    const res = await fetch('/api/frame-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        ratio: studioRatio,
+        fit_mode: studioFitMode,
+        template_style: studioTemplate,
+        offset_x: studioOffsetX,
+        offset_y: studioOffsetY,
+        caption_enabled: captionOn,
+        car_model: model,
+        car_price: price,
+        car_specs: specs
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      syncUiWithFrameConfig(data.frame_config);
+      if (!silent && fb) {
+        fb.textContent = `Default Frame Preset saved (${TEMPLATE_LABELS[studioTemplate] || studioTemplate} • ${studioRatio}) and applied!`;
+        fb.classList.remove('hidden');
+        setTimeout(() => fb.classList.add('hidden'), 3500);
+      }
+      await fetchState();
+    }
+  }
+
+  async function uploadCustomPlateOverlay(fileList) {
+    if (!fileList || !fileList.length) return;
+    const file = fileList[0];
+    const fd = new FormData();
+    fd.append('file', file);
+    const fb = document.getElementById('overlay-upload-feedback');
+
+    const res = await fetch('/api/plate-overlay', {
+      method: 'POST',
+      body: fd,
+      credentials: 'same-origin'
+    });
+    if (res.ok) {
+      const prev = document.getElementById('plate-overlay-preview-img');
+      if (prev) prev.src = '/media/plate-overlay?t=' + Date.now();
+      if (fb) {
+        fb.textContent = `Plate cover updated (${file.name}) and applied to all vehicles!`;
+        fb.classList.remove('hidden');
+        setTimeout(() => fb.classList.add('hidden'), 4000);
+      }
+      refreshStudioCanvas();
+      await fetchState();
+    }
+  }
+
+  async function resetCustomPlateOverlay() {
+    const fb = document.getElementById('overlay-upload-feedback');
+    const res = await fetch('/api/plate-overlay', {
+      method: 'DELETE',
+      credentials: 'same-origin'
+    });
+    if (res.ok) {
+      const prev = document.getElementById('plate-overlay-preview-img');
+      if (prev) prev.src = '/media/plate-overlay?t=' + Date.now();
+      if (fb) {
+        fb.textContent = 'Reset to default Forest Wheel plate cover.';
+        fb.classList.remove('hidden');
+        setTimeout(() => fb.classList.add('hidden'), 3500);
+      }
+      refreshStudioCanvas();
+      await fetchState();
+    }
   }
 
   function buildStudioRenderUrl(download = 0) {

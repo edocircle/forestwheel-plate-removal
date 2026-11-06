@@ -312,4 +312,54 @@ def test_car_management_edit_and_delete_scopes(tmp_path: Path) -> None:
     assert not (review_dir / "SBA8888X").exists()
 
 
+def test_frame_config_preset_and_custom_plate_overlay(tmp_path: Path) -> None:
+    """Verify saving Frame preset config applies to uploads/outputs and uploading a custom plate cover works."""
+    client, _, output_dir, _ = _setup_review_fixture(tmp_path)
+    auth = ("reviewer", "s3cr3t-pass")
+
+    # 1. Save global Frame configuration preset (Soft Grey, Fit to frame, 9:16)
+    cfg_resp = client.post(
+        "/api/frame-config",
+        json={
+            "ratio": "9:16",
+            "fit_mode": "fit",
+            "template_style": "soft_grey",
+            "caption_enabled": True,
+            "car_model": "Mercedes-AMG GT",
+            "car_price": "$399,000",
+        },
+        auth=auth,
+    )
+    assert cfg_resp.status_code == 200
+    saved_cfg = cfg_resp.json()["frame_config"]
+    assert saved_cfg["ratio"] == "9:16"
+    assert saved_cfg["template_style"] == "soft_grey"
+
+    # 2. Upload a custom plate cover overlay image
+    overlay_img = np.full((80, 260, 3), (10, 80, 200), dtype=np.uint8)
+    _, png_buf = cv2.imencode(".png", overlay_img)
+    ov_resp = client.post(
+        "/api/plate-overlay",
+        files=[("file", ("dealer_plate.png", png_buf.tobytes(), "image/png"))],
+        auth=auth,
+    )
+    assert ov_resp.status_code == 200
+    assert ov_resp.json()["has_custom_overlay"] is True
+
+    # Serve active plate overlay
+    get_ov = client.get("/media/plate-overlay", auth=auth)
+    assert get_ov.status_code == 200
+    assert get_ov.headers["content-type"] == "image/png"
+
+    # 3. Approve review image and verify full-resolution popup endpoint works across ratios
+    client.post("/api/approve/SBA8888X/01_rear_angle.jpg", auth=auth)
+    full_resp = client.get(
+        "/media/output/SBA8888X/01_rear_angle.jpg?ratio=9:16&full=1",
+        auth=auth,
+    )
+    assert full_resp.status_code == 200
+    assert full_resp.content[:2] == b"\xff\xd8"
+
+
+
 

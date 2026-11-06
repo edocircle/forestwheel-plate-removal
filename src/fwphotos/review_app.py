@@ -239,6 +239,8 @@ def create_review_app(
         state_file_override or paths_cfg.get("state_file", "data/processed_state.json")
     )
     cars_meta_file = state_file.parent / "cars_metadata.json"
+    frame_config_file = state_file.parent / "frame_config.json"
+    custom_overlay_file = state_file.parent / "custom_plate_overlay.png"
     car_state_file_cfg = sync_cfg.get("car_state_file")
     car_state_dir = Path(car_state_file_cfg).parent if car_state_file_cfg else state_file.parent
 
@@ -248,7 +250,55 @@ def create_review_app(
     overlay_path = Path(
         paths_cfg.get("plate_overlay_asset", "assets/plate_overlay.png")
     )
-    overlay_bgra = load_overlay_rgba(overlay_path) if overlay_path.exists() else None
+    overlay_bgra = (
+        load_overlay_rgba(custom_overlay_file)
+        if custom_overlay_file.exists()
+        else (load_overlay_rgba(overlay_path) if overlay_path.exists() else None)
+    )
+
+    def _get_frame_config() -> dict[str, Any]:
+        """Return the active pre-selected Frame configuration (defaults to Clean White, Fit to frame, 16:9)."""
+        cfg = _load_json_dict(frame_config_file)
+        return {
+            "ratio": str(cfg.get("ratio", "16:9")),
+            "fit_mode": str(cfg.get("fit_mode", "fit")),
+            "template_style": str(cfg.get("template_style", "clean_white")),
+            "offset_x": float(cfg.get("offset_x", 0.5)),
+            "offset_y": float(cfg.get("offset_y", 0.5)),
+            "caption_enabled": bool(cfg.get("caption_enabled", True)),
+            "car_model": str(cfg.get("car_model", "Forest Wheel Showroom")),
+            "car_price": str(cfg.get("car_price", "")),
+            "car_specs": str(cfg.get("car_specs", "Verified Quality Pre-Owned • Singapore")),
+            "has_custom_overlay": custom_overlay_file.exists(),
+        }
+
+    def _render_with_active_frame_config(
+        covered_bgr: np.ndarray,
+        car_id: str | None = None,
+        ratio_override: str | None = None,
+    ) -> Image.Image:
+        """Render a plate-covered BGR photo using the pre-selected Frame configuration across any ratio."""
+        fcfg = _get_frame_config()
+        all_meta = _load_json_dict(cars_meta_file)
+        car_meta = all_meta.get(car_id or "", {}) if car_id else {}
+
+        target_ratio = ratio_override or fcfg["ratio"]
+        model_str = car_meta.get("car_model") or fcfg["car_model"]
+        price_str = car_meta.get("car_price") or fcfg["car_price"]
+        specs_str = car_meta.get("car_specs") or fcfg["car_specs"]
+
+        return render_apple_frame_studio(
+            image_bgr=covered_bgr,
+            ratio=target_ratio,
+            fit_mode=fcfg["fit_mode"],
+            template_style=fcfg["template_style"],
+            offset_x=fcfg["offset_x"],
+            offset_y=fcfg["offset_y"],
+            caption_enabled=fcfg["caption_enabled"],
+            car_model=model_str,
+            car_price=price_str,
+            car_specs=specs_str,
+        )
 
     supported_exts = list(
         det_cfg.get("supported_extensions", [".jpg", ".jpeg", ".png", ".heic"])
@@ -407,13 +457,145 @@ def create_review_app(
 
     @app.get("/api/state")
     def api_state(_user: str = Depends(verify_auth)) -> JSONResponse:
-        """Return complete state of both output/ and review/ car galleries plus car metadata."""
+        """Return complete state of both output/ and review/ car galleries, metadata, and Frame configuration."""
         return JSONResponse(
             content={
                 "cars_output": _discover_folder_tree(output_dir, is_review=False),
                 "cars_review": _discover_folder_tree(review_dir, is_review=True),
                 "cars_meta": _load_json_dict(cars_meta_file),
+                "frame_config": _get_frame_config(),
             }
+        )
+
+    @app.get("/api/frame-config")
+    def api_get_frame_config(_user: str = Depends(verify_auth)) -> JSONResponse:
+        """Return the pre-selected Frame configuration."""
+        return JSONResponse(content={"ok": True, "frame_config": _get_frame_config()})
+
+    @app.post("/api/frame-config")
+    def api_save_frame_config(
+        payload: dict[str, Any] = Body(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Save the global Frame configuration and re-apply it to existing output photos."""
+        cur = _get_frame_config()
+        new_cfg = {
+            "ratio": str(payload.get("ratio", cur["ratio"])),
+            "fit_mode": str(payload.get("fit_mode", cur["fit_mode"])),
+            "template_style": str(payload.get("template_style", cur["template_style"])),
+            "offset_x": float(payload.get("offset_x", cur["offset_x"])),
+            "offset_y": float(payload.get("offset_y", cur["offset_y"])),
+            "caption_enabled": bool(payload.get("caption_enabled", cur["caption_enabled"])),
+            "car_model": str(payload.get("car_model", cur["car_model"])),
+            "car_price": str(payload.get("car_price", cur["car_price"])),
+            "car_specs": str(payload.get("car_specs", cur["car_specs"])),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_json_dict(frame_config_file, new_cfg)
+
+        # Re-render all existing output photos with the newly saved Frame configuration
+        out_tree = _discover_folder_tree(output_dir, is_review=False)
+        updated_files = 0
+        for cid, items in out_tree.items():
+            target_d = output_dir if cid == "_root" else (output_dir / cid)
+            for item in items:
+                fname = item["filename"]
+                stem = Path(fname).stem
+                covered_bgr = _find_plate_covered_base(cid, stem)
+                if covered_bgr is not None:
+                    framed_pil = _render_with_active_frame_config(
+                        covered_bgr, car_id=cid, ratio_override=new_cfg["ratio"]
+                    )
+                    out_p = target_d / fname
+                    framed_pil.convert("RGB").save(out_p, format="JPEG", quality=jpeg_quality)
+                    updated_files += 1
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "frame_config": _get_frame_config(),
+                "updated_files": updated_files,
+            }
+        )
+
+    @app.post("/api/plate-overlay")
+    async def api_upload_plate_overlay(
+        file: UploadFile = File(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Upload a custom image to cover the license plate across all photos."""
+        nonlocal overlay_bgra
+        raw_bytes = await file.read()
+        if not raw_bytes:
+            raise HTTPException(status_code=400, detail="Empty overlay file.")
+
+        try:
+            with Image.open(io.BytesIO(raw_bytes)) as pil_ov:
+                rgba = pil_ov.convert("RGBA")
+                custom_overlay_file.parent.mkdir(parents=True, exist_ok=True)
+                rgba.save(custom_overlay_file, format="PNG")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=400, detail=f"Invalid image file for plate overlay: {exc}"
+            ) from exc
+
+        overlay_bgra = load_overlay_rgba(custom_overlay_file)
+
+        # Clear cached plate-covered base images so existing cars re-render with the new plate cover
+        cache_root = output_dir / "_covered_cache"
+        if cache_root.exists():
+            shutil.rmtree(cache_root, ignore_errors=True)
+
+        # Re-render existing output photos with the new plate cover and active frame config
+        out_tree = _discover_folder_tree(output_dir, is_review=False)
+        for cid, items in out_tree.items():
+            target_d = output_dir if cid == "_root" else (output_dir / cid)
+            for item in items:
+                fname = item["filename"]
+                stem = Path(fname).stem
+                covered_bgr = _find_plate_covered_base(cid, stem)
+                if covered_bgr is not None:
+                    framed_pil = _render_with_active_frame_config(covered_bgr, car_id=cid)
+                    framed_pil.convert("RGB").save(target_d / fname, format="JPEG", quality=jpeg_quality)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "has_custom_overlay": True,
+                "filename": file.filename or "custom_plate_overlay.png",
+            }
+        )
+
+    @app.delete("/api/plate-overlay")
+    def api_reset_plate_overlay(_user: str = Depends(verify_auth)) -> JSONResponse:
+        """Reset the plate cover overlay back to the default Forest Wheel plate_overlay.png."""
+        nonlocal overlay_bgra
+        if custom_overlay_file.exists():
+            custom_overlay_file.unlink(missing_ok=True)
+        overlay_bgra = load_overlay_rgba(overlay_path) if overlay_path.exists() else None
+
+        cache_root = output_dir / "_covered_cache"
+        if cache_root.exists():
+            shutil.rmtree(cache_root, ignore_errors=True)
+
+        return JSONResponse(content={"ok": True, "has_custom_overlay": False})
+
+    @app.get("/media/plate-overlay")
+    def media_plate_overlay(_user: str = Depends(verify_auth)) -> Response:
+        """Serve the currently active license plate cover image (custom or default)."""
+        active_p = custom_overlay_file if custom_overlay_file.exists() else overlay_path
+        if active_p.exists():
+            return Response(
+                content=active_p.read_bytes(),
+                media_type="image/png",
+                headers={"Cache-Control": "private, no-store"},
+            )
+        # Fallback synthetic preview
+        blank = Image.new("RGB", (400, 110), (20, 45, 35))
+        return Response(
+            content=_pil_to_jpeg_bytes(blank),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store"},
         )
 
     @app.post("/api/upload")
@@ -480,8 +662,10 @@ def create_review_app(
             detector=_get_detector(),
         )
 
-        # Also cache the plate-covered base image (before template border) so user can switch
-        # between 1:1, 16:9, and 9:16 dynamically in Vehicle Galleries without re-cropping a border.
+        # Also cache the plate-covered base image (using active custom or default plate cover)
+        # and compose the output photo using the pre-selected Frame configuration from the Frame page.
+        active_fcfg = _get_frame_config()
+        effective_ratio = ratio if ratio else active_fcfg["ratio"]
         cache_dir = output_dir / "_covered_cache" / clean_cid
         cache_dir.mkdir(parents=True, exist_ok=True)
         for rec in records:
@@ -492,6 +676,11 @@ def create_review_app(
                     dets = _get_detector().detect_array(bgr)
                     ov = apply_plate_overlays(bgr, dets, settings, overlay_bgra)
                     cv2.imwrite(str(cache_dir / f"{src_p.stem}.jpg"), ov.image_bgr)
+                    framed_pil = _render_with_active_frame_config(
+                        ov.image_bgr, car_id=clean_cid, ratio_override=effective_ratio
+                    )
+                    out_file = car_out / f"{src_p.stem}.jpg"
+                    framed_pil.convert("RGB").save(out_file, format="JPEG", quality=jpeg_quality)
 
         out_count = sum(1 for r in records if r.destination == "output")
         rev_count = sum(1 for r in records if r.destination == "review")
@@ -548,6 +737,23 @@ def create_review_app(
             force=True,
             detector=_get_detector(),
         )
+        active_fcfg = _get_frame_config()
+        effective_ratio = ratio if ratio else active_fcfg["ratio"]
+        cache_dir = output_dir / "_covered_cache" / clean_cid
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        for rec in records:
+            if rec.destination == "output":
+                src_p = car_inbox / rec.filename
+                if src_p.exists():
+                    bgr = load_image_bgr(src_p)
+                    dets = _get_detector().detect_array(bgr)
+                    ov = apply_plate_overlays(bgr, dets, settings, overlay_bgra)
+                    cv2.imwrite(str(cache_dir / f"{src_p.stem}.jpg"), ov.image_bgr)
+                    framed_pil = _render_with_active_frame_config(
+                        ov.image_bgr, car_id=clean_cid, ratio_override=effective_ratio
+                    )
+                    out_file = (output_dir / clean_cid) / f"{src_p.stem}.jpg"
+                    framed_pil.convert("RGB").save(out_file, format="JPEG", quality=jpeg_quality)
         return JSONResponse(
             content={
                 "ok": True,
@@ -558,13 +764,17 @@ def create_review_app(
 
     @app.get("/media/before/{car_id}/{filename}")
     def media_before(
-        car_id: str, filename: str, _user: str = Depends(verify_auth)
+        car_id: str,
+        filename: str,
+        full: int = Query(0),
+        _user: str = Depends(verify_auth),
     ) -> Response:
-        """Serve authenticated 'Before' thumbnail of a review image."""
+        """Serve authenticated 'Before' thumbnail (or full resolution) of a review image."""
         img_path = _resolve_child_file(review_dir, car_id, filename)
         bgr = load_image_bgr(img_path)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=thumb_width)
+        max_w = 0 if full else thumb_width
+        jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=max_w, quality=jpeg_quality)
         return Response(
             content=jpeg_bytes,
             media_type="image/jpeg",
@@ -575,22 +785,23 @@ def create_review_app(
     def media_after(
         car_id: str,
         filename: str,
-        ratio: str = Query("16:9"),
+        ratio: str | None = Query(default=None),
+        full: int = Query(0),
         _user: str = Depends(verify_auth),
     ) -> Response:
-        """Serve authenticated 'After' template preview thumbnail of a review image in 1:1, 16:9, or 9:16."""
+        """Serve authenticated 'After' framed preview of a review image using the pre-selected Frame config."""
         img_path = _resolve_child_file(review_dir, car_id, filename)
-        profile_name = resolve_ratio_profile(ratio, default_profile="website")
-        composed_pil = _render_composed_image(
-            img_path=img_path,
-            settings=settings,
-            template_cfg=template_cfg,
-            detector=_get_detector(),
-            overlay_bgra=overlay_bgra,
-            profile_name=profile_name,
-            low_conf_floor=low_conf_floor,
+        image_bgr = load_image_bgr(img_path)
+        dets = _get_detector().detect_array(image_bgr, min_conf=low_conf_floor)
+        if dets:
+            processed_bgr = apply_plate_overlays(image_bgr, dets, settings, overlay_bgra).image_bgr
+        else:
+            processed_bgr = image_bgr
+        composed_pil = _render_with_active_frame_config(
+            processed_bgr, car_id=car_id, ratio_override=ratio
         )
-        jpeg_bytes = _pil_to_jpeg_bytes(composed_pil, max_width=thumb_width)
+        max_w = 0 if full else thumb_width
+        jpeg_bytes = _pil_to_jpeg_bytes(composed_pil, max_width=max_w, quality=jpeg_quality)
         return Response(
             content=jpeg_bytes,
             media_type="image/jpeg",
@@ -601,36 +812,42 @@ def create_review_app(
     def media_output(
         car_id: str,
         filename: str,
-        ratio: str = Query("16:9"),
+        ratio: str | None = Query(default=None),
         download: int = Query(0),
+        full: int = Query(0),
         _user: str = Depends(verify_auth),
     ) -> Response:
-        """Serve or download a processed output image dynamically rendered in 1:1, 16:9, or 9:16."""
+        """Serve or download a processed output image rendered with the pre-selected Frame config across any ratio."""
         out_path = _resolve_child_file(output_dir, car_id, filename)
-        profile_name = resolve_ratio_profile(ratio, default_profile="ratio_16_9")
+        active_fcfg = _get_frame_config()
+        effective_ratio = ratio or active_fcfg["ratio"]
 
         covered_bgr = _find_plate_covered_base(car_id, out_path.stem)
         if covered_bgr is not None:
-            pil_img = compose_template(covered_bgr, template_cfg, profile_name=profile_name)
+            pil_img = _render_with_active_frame_config(
+                covered_bgr, car_id=car_id, ratio_override=effective_ratio
+            )
         else:
             bgr = load_image_bgr(out_path)
-            pil_img = compose_template(bgr, template_cfg, profile_name=profile_name)
+            pil_img = _render_with_active_frame_config(
+                bgr, car_id=car_id, ratio_override=effective_ratio
+            )
 
-        max_w = 0 if download else thumb_width
+        max_w = 0 if (download or full) else thumb_width
         jpeg_bytes = _pil_to_jpeg_bytes(pil_img, max_width=max_w, quality=jpeg_quality)
         headers = {"Cache-Control": "private, no-store"}
         if download:
-            dl_name = f"{car_id}_{ratio.replace(':', 'x')}_{filename}"
+            dl_name = f"{car_id}_{effective_ratio.replace(':', 'x')}_{filename}"
             headers["Content-Disposition"] = f'attachment; filename="{dl_name}"'
         return Response(content=jpeg_bytes, media_type="image/jpeg", headers=headers)
 
     @app.get("/api/export/{car_id}")
     def api_export_zip(
         car_id: str,
-        ratio: str = Query("16:9"),
+        ratio: str | None = Query(default=None),
         _user: str = Depends(verify_auth),
     ) -> Response:
-        """Export all processed photos for a Car ID as a ZIP archive in the selected ratio (1:1, 16:9, 9:16)."""
+        """Export all processed photos for a Car ID as a ZIP archive using the pre-selected Frame config."""
         safe_car = _validate_path_segment(car_id)
         target_dir = output_dir if safe_car == "_root" else (output_dir / safe_car)
         if not target_dir.exists():
@@ -640,19 +857,24 @@ def create_review_app(
         if not imgs:
             raise HTTPException(status_code=404, detail="No processed images found for car.")
 
-        profile_name = resolve_ratio_profile(ratio, default_profile="ratio_16_9")
+        active_fcfg = _get_frame_config()
+        effective_ratio = ratio or active_fcfg["ratio"]
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
             for p in imgs:
                 covered_bgr = _find_plate_covered_base(safe_car, p.stem)
                 if covered_bgr is not None:
-                    pil_img = compose_template(covered_bgr, template_cfg, profile_name=profile_name)
+                    pil_img = _render_with_active_frame_config(
+                        covered_bgr, car_id=safe_car, ratio_override=effective_ratio
+                    )
                 else:
-                    pil_img = compose_template(load_image_bgr(p), template_cfg, profile_name=profile_name)
+                    pil_img = _render_with_active_frame_config(
+                        load_image_bgr(p), car_id=safe_car, ratio_override=effective_ratio
+                    )
                 img_bytes = _pil_to_jpeg_bytes(pil_img, max_width=0, quality=jpeg_quality)
-                zf.writestr(f"{p.stem}_{ratio.replace(':', 'x')}.jpg", img_bytes)
+                zf.writestr(f"{p.stem}_{effective_ratio.replace(':', 'x')}.jpg", img_bytes)
 
-        zip_filename = f"{safe_car}_{ratio.replace(':', 'x')}_export.zip"
+        zip_filename = f"{safe_car}_{effective_ratio.replace(':', 'x')}_export.zip"
         return Response(
             content=zip_buf.getvalue(),
             media_type="application/zip",
@@ -689,30 +911,46 @@ def create_review_app(
     def api_approve(
         car_id: str,
         filename: str,
-        ratio: str = Query("website"),
+        ratio: str | None = Query(default=None),
         payload: dict[str, Any] | None = Body(default=None),
         user: str = Depends(verify_auth),
     ) -> JSONResponse:
-        """Approve a review image: compose template, write to output/, remove from review/."""
+        """Approve a review image: compose with pre-selected Frame config, write to output/, remove from review/."""
         img_path = _resolve_child_file(review_dir, car_id, filename)
-        profile_name = resolve_ratio_profile(ratio, default_profile="website")
         quad_pct = payload.get("quad_pct") if isinstance(payload, dict) else None
 
-        composed_pil = _render_composed_image(
-            img_path=img_path,
-            settings=settings,
-            template_cfg=template_cfg,
-            detector=_get_detector(),
-            overlay_bgra=overlay_bgra,
-            profile_name=profile_name,
-            low_conf_floor=low_conf_floor,
-            custom_quad_pct=quad_pct,
+        image_bgr = load_image_bgr(img_path)
+        img_h, img_w = image_bgr.shape[:2]
+        if quad_pct and len(quad_pct) == 4 and overlay_bgra is not None:
+            pts = np.array(
+                [[p[0] * img_w / 100.0, p[1] * img_h / 100.0] for p in quad_pct],
+                dtype=np.float32,
+            )
+            feather_px = int(settings.get("overlay", {}).get("feather_px", 5))
+            processed_bgr = warp_and_composite_single(
+                image_bgr, overlay_bgra, pts, feather_px=feather_px
+            )
+        else:
+            dets = _get_detector().detect_array(image_bgr, min_conf=low_conf_floor)
+            if dets:
+                processed_bgr = apply_plate_overlays(image_bgr, dets, settings, overlay_bgra).image_bgr
+            else:
+                processed_bgr = image_bgr
+
+        cache_f = output_dir / "_covered_cache" / car_id / f"{img_path.stem}.jpg"
+        cache_f.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(cache_f), processed_bgr)
+
+        active_fcfg = _get_frame_config()
+        effective_ratio = ratio if (ratio and ratio != "website") else active_fcfg["ratio"]
+        composed_pil = _render_with_active_frame_config(
+            processed_bgr, car_id=car_id, ratio_override=effective_ratio
         )
 
         target_dir = output_dir if car_id == "_root" else (output_dir / car_id)
         target_dir.mkdir(parents=True, exist_ok=True)
         out_path = target_dir / f"{img_path.stem}.jpg"
-        composed_pil.save(out_path, format="JPEG", quality=jpeg_quality)
+        composed_pil.convert("RGB").save(out_path, format="JPEG", quality=jpeg_quality)
 
         img_path.unlink()
 
@@ -721,7 +959,7 @@ def create_review_app(
         decisions[key] = {
             "status": "approved",
             "approved_by": user,
-            "ratio": ratio,
+            "ratio": effective_ratio,
             "output_path": str(out_path),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -767,9 +1005,10 @@ def create_review_app(
     def media_original(
         car_id: str,
         filename: str,
+        full: int = Query(0),
         _user: str = Depends(verify_auth),
     ) -> Response:
-        """Serve authenticated original ('Before' plate removal) thumbnail for any car in Gallery."""
+        """Serve authenticated original ('Before' plate removal) photo for any car in Gallery."""
         safe_car = _validate_path_segment(car_id)
         safe_name = _validate_path_segment(filename)
         stem = Path(safe_name).stem
@@ -802,7 +1041,8 @@ def create_review_app(
 
         bgr = load_image_bgr(found_path)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=thumb_width)
+        max_w = 0 if full else thumb_width
+        jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=max_w, quality=jpeg_quality)
         return Response(
             content=jpeg_bytes,
             media_type="image/jpeg",
@@ -813,6 +1053,7 @@ def create_review_app(
     def media_clean(
         car_id: str,
         filename: str,
+        full: int = Query(0),
         _user: str = Depends(verify_auth),
     ) -> Response:
         """Serve authenticated plate-removed ('After' plate removal, frameless) image for Gallery & Frame Studio."""
@@ -839,7 +1080,8 @@ def create_review_app(
             raise HTTPException(status_code=404, detail="Plate-removed image not found.")
 
         rgb = cv2.cvtColor(covered_bgr, cv2.COLOR_BGR2RGB)
-        jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=thumb_width)
+        max_w = 0 if full else thumb_width
+        jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=max_w, quality=jpeg_quality)
         return Response(
             content=jpeg_bytes,
             media_type="image/jpeg",
