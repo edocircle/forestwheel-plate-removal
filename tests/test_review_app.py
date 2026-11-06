@@ -361,5 +361,55 @@ def test_frame_config_preset_and_custom_plate_overlay(tmp_path: Path) -> None:
     assert full_resp.content[:2] == b"\xff\xd8"
 
 
+def test_upload_empty_listing_price_hides_price_and_preserves_specs(tmp_path: Path) -> None:
+    """When Listing Price is empty on Upload, car_price is stored as '' (no default price shown) and car_specs is saved."""
+    _, _, output_dir, _ = _setup_review_fixture(tmp_path)
+    auth = ("reviewer", "s3cr3t-pass")
+
+    class _HighConfDetector(PlateDetector):
+        def __init__(self) -> None:
+            super().__init__(weights_path=Path("models/dummy.pt"), confidence_threshold=0.40)
+
+        def detect_array(
+            self, image_bgr: np.ndarray, min_conf: float | None = None
+        ) -> list[Detection]:
+            return [Detection(bbox=(40, 40, 140, 80), confidence=0.95)]
+
+    app = create_review_app(
+        config_path=Path("config/settings.yaml"),
+        review_dir_override=tmp_path / "rev_empty_price",
+        output_dir_override=output_dir,
+        inbox_dir_override=tmp_path / "in_empty_price",
+        decisions_file_override=tmp_path / "dec_empty_price.json",
+        state_file_override=tmp_path / "st_empty_price.json",
+        detector=_HighConfDetector(),
+        env={"FW_REVIEW_USER": "reviewer", "FW_REVIEW_PASS": "s3cr3t-pass"},
+    )
+    client = TestClient(app)
+
+    img = np.full((240, 360, 3), (45, 90, 65), dtype=np.uint8)
+    _, jpg_buf = cv2.imencode(".jpg", img)
+
+    up_resp = client.post(
+        "/api/upload",
+        data={
+            "car_id": "SGP 9999 X",
+            "ratio": "16:9",
+            "car_model": "2024 Honda Civic Type R",
+            "car_price": "",
+            "car_specs": "Championship White • 6MT",
+        },
+        files=[("files", ("civic.jpg", jpg_buf.tobytes(), "image/jpeg"))],
+        auth=auth,
+    )
+    assert up_resp.status_code == 200
+
+    st_resp = client.get("/api/state", auth=auth).json()
+    car_meta = st_resp["cars_meta"]["SGP-9999-X"]
+    assert car_meta["car_price"] == ""
+    assert car_meta["car_specs"] == "Championship White • 6MT"
+
+
+
 
 

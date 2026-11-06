@@ -283,9 +283,10 @@ def create_review_app(
         car_meta = all_meta.get(car_id or "", {}) if car_id else {}
 
         target_ratio = ratio_override or fcfg["ratio"]
-        model_str = car_meta.get("car_model") or fcfg["car_model"]
-        price_str = car_meta.get("car_price") or fcfg["car_price"]
-        specs_str = car_meta.get("car_specs") or fcfg["car_specs"]
+        model_str = car_meta.get("car_model") if "car_model" in car_meta else fcfg["car_model"]
+        # If the car was uploaded with an empty price, keep it empty so no price is rendered in the frame
+        price_str = car_meta.get("car_price", "") if car_meta else fcfg["car_price"]
+        specs_str = car_meta.get("car_specs", "") if "car_specs" in car_meta else fcfg["car_specs"]
 
         return render_apple_frame_studio(
             image_bgr=covered_bgr,
@@ -295,9 +296,9 @@ def create_review_app(
             offset_x=fcfg["offset_x"],
             offset_y=fcfg["offset_y"],
             caption_enabled=fcfg["caption_enabled"],
-            car_model=model_str,
-            car_price=price_str,
-            car_specs=specs_str,
+            car_model=str(model_str or ""),
+            car_price=str(price_str or ""),
+            car_specs=str(specs_str or ""),
         )
 
     supported_exts = list(
@@ -614,13 +615,14 @@ def create_review_app(
         profile_name = resolve_ratio_profile(ratio, default_profile="ratio_16_9")
 
         # Save car metadata (plate display string, model, price, specs, masking style)
+        # Note: if car_price is empty, store "" so no price is displayed on the frame.
         all_meta = _load_json_dict(cars_meta_file)
         cur_meta = all_meta.get(clean_cid, {})
         all_meta[clean_cid] = {
             "plate_display": car_id.strip() or clean_cid,
             "car_model": car_model.strip() or cur_meta.get("car_model", f"Vehicle {clean_cid}"),
-            "car_price": car_price.strip() or cur_meta.get("car_price", "$188,800"),
-            "car_specs": car_specs.strip() or cur_meta.get("car_specs", "Verified Showroom • Auto"),
+            "car_price": car_price.strip(),
+            "car_specs": car_specs.strip(),
             "masking_style": masking_style.strip() or cur_meta.get("masking_style", "clean_blank"),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }

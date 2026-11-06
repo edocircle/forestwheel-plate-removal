@@ -216,7 +216,8 @@ def render_apple_frame_studio(
     photo_pil = Image.fromarray(rgb_arr)
 
     # Determine inner photo viewport and outer surface based on Apple template style
-    caption_h = 116 if (caption_enabled and (car_model or car_price) and style in ("clean_white", "soft_grey", "rounded_card")) else 0
+    has_caption_text = bool(car_model.strip() or car_price.strip() or car_specs.strip())
+    caption_h = 116 if (caption_enabled and has_caption_text and style in ("clean_white", "soft_grey", "rounded_card")) else 0
 
     if style == "clean_white":
         bg_color = (255, 255, 255)
@@ -298,14 +299,14 @@ def render_apple_frame_studio(
         )
 
     # Render optional caption (car model, specs, price)
-    if caption_enabled and (car_model.strip() or car_price.strip()):
+    if caption_enabled and has_caption_text:
         title_font = _load_font(None, 32)
         sub_font = _load_font(None, 20)
         price_font = _load_font(None, 34)
 
         model_txt = car_model.strip()
         price_txt = car_price.strip()
-        specs_txt = car_specs.strip() or "Forest Wheel Verified Showroom"
+        specs_txt = car_specs.strip()
 
         if style in ("glass_overlay", "minimal_border"):
             # Floating frosted glass pill at the bottom of the frame

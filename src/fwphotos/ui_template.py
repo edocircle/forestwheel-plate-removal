@@ -243,10 +243,16 @@ tailwind.config = {
                      class="w-full bg-surface-container-low border border-outline-variant/40 focus:border-primary focus:bg-white rounded-xl px-3 py-2 text-xs font-semibold text-on-surface"/>
             </div>
             <div>
-              <label for="input-car-price" class="block text-xs font-semibold text-on-surface-variant mb-1">Listing Price</label>
-              <input id="input-car-price" type="text" value="$248,900" placeholder="e.g. $248,900"
+              <label for="input-car-price" class="block text-xs font-semibold text-on-surface-variant mb-1">Listing Price <span class="text-outline font-normal">(optional)</span></label>
+              <input id="input-car-price" type="text" value="" placeholder="Leave empty for no price"
                      class="w-full bg-surface-container-low border border-outline-variant/40 focus:border-primary focus:bg-white rounded-xl px-3 py-2 text-xs font-semibold text-primary"/>
             </div>
+          </div>
+
+          <div>
+            <label for="input-car-specs" class="block text-xs font-semibold text-on-surface-variant mb-1">Subtitle / Specs <span class="text-outline font-normal">(shown below car title)</span></label>
+            <input id="input-car-specs" type="text" value="4,200 mi • PDK • Shark Blue" placeholder="e.g. 4,200 mi • PDK • Verified Pre-Owned"
+                   class="w-full bg-surface-container-low border border-outline-variant/40 focus:border-primary focus:bg-white rounded-xl px-3 py-2 text-xs text-on-surface"/>
           </div>
         </div>
 
@@ -587,7 +593,7 @@ tailwind.config = {
 
     <!-- Inline Edit Car Group Drawer (Hidden by default) -->
     <div id="modal-edit-car-drawer" class="hidden px-6 py-4 bg-surface-container-low border-b border-outline-variant/30">
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+      <div class="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
         <div>
           <label class="block text-[11px] font-semibold text-on-surface-variant mb-1">Plate Number (Group ID)</label>
           <input id="edit-car-plate" type="text" class="w-full bg-white border border-outline-variant/50 rounded-xl px-3 py-2 text-xs font-bold uppercase text-on-surface"/>
@@ -597,8 +603,12 @@ tailwind.config = {
           <input id="edit-car-model" type="text" class="w-full bg-white border border-outline-variant/50 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface"/>
         </div>
         <div>
-          <label class="block text-[11px] font-semibold text-on-surface-variant mb-1">Price</label>
-          <input id="edit-car-price" type="text" class="w-full bg-white border border-outline-variant/50 rounded-xl px-3 py-2 text-xs font-semibold text-primary"/>
+          <label class="block text-[11px] font-semibold text-on-surface-variant mb-1">Subtitle / Specs</label>
+          <input id="edit-car-specs" type="text" class="w-full bg-white border border-outline-variant/50 rounded-xl px-3 py-2 text-xs text-on-surface"/>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-on-surface-variant mb-1">Price (optional)</label>
+          <input id="edit-car-price" type="text" placeholder="Empty = hidden" class="w-full bg-white border border-outline-variant/50 rounded-xl px-3 py-2 text-xs font-semibold text-primary"/>
         </div>
         <div class="flex gap-2">
           <button type="button" onclick="saveCarGroupMetadata()" class="flex-1 py-2 rounded-xl bg-primary text-white text-xs font-semibold">Save Changes</button>
@@ -891,8 +901,8 @@ tailwind.config = {
     return {
       plate_display: meta.plate_display || carId.replace(/-/g, ' '),
       car_model: meta.car_model || 'Forest Wheel Showroom Vehicle',
-      car_price: meta.car_price || '$188,800',
-      car_specs: meta.car_specs || 'Verified Pre-Owned • Singapore'
+      car_price: typeof meta.car_price === 'string' ? meta.car_price : '',
+      car_specs: typeof meta.car_specs === 'string' ? meta.car_specs : 'Verified Pre-Owned • Singapore'
     };
   }
 
@@ -1036,6 +1046,7 @@ tailwind.config = {
     const plateVal = (document.getElementById('input-plate-number').value || 'SXX 1234 A').trim();
     const modelVal = (document.getElementById('input-car-model').value || '').trim();
     const priceVal = (document.getElementById('input-car-price').value || '').trim();
+    const specsVal = (document.getElementById('input-car-specs')?.value || '').trim();
     const msgEl = document.getElementById('upload-status-msg');
     const btnLabel = document.getElementById('btn-process-save-label');
 
@@ -1055,6 +1066,7 @@ tailwind.config = {
     fd.append('ratio', uploadRatio);
     fd.append('car_model', modelVal);
     fd.append('car_price', priceVal);
+    fd.append('car_specs', specsVal);
     uploadFilesQueue.forEach(item => fd.append('files', item.file));
 
     try {
@@ -1236,6 +1248,7 @@ tailwind.config = {
                   ${reviewCount > 0 ? `<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">${reviewCount} Review</span>` : ''}
                 </div>
                 <h3 class="text-base font-bold text-on-surface mt-1.5">${meta.car_model}</h3>
+                ${meta.car_specs ? `<p class="text-xs text-on-surface-variant mt-0.5">${meta.car_specs}${meta.car_price ? ' • <span class="text-primary font-semibold">' + meta.car_price + '</span>' : ''}</p>` : (meta.car_price ? `<p class="text-xs text-primary font-semibold mt-0.5">${meta.car_price}</p>` : '')}
               </div>
             </div>
 
@@ -1349,6 +1362,7 @@ tailwind.config = {
     const meta = getCarMeta(activeModalCarId);
     document.getElementById('edit-car-plate').value = meta.plate_display;
     document.getElementById('edit-car-model').value = meta.car_model;
+    document.getElementById('edit-car-specs').value = meta.car_specs;
     document.getElementById('edit-car-price').value = meta.car_price;
     drawer.classList.toggle('hidden');
   }
@@ -1357,6 +1371,7 @@ tailwind.config = {
     if (!activeModalCarId) return;
     const newPlate = document.getElementById('edit-car-plate').value.trim();
     const newModel = document.getElementById('edit-car-model').value.trim();
+    const newSpecs = document.getElementById('edit-car-specs').value.trim();
     const newPrice = document.getElementById('edit-car-price').value.trim();
 
     const res = await fetch(`/api/cars/${encodeURIComponent(activeModalCarId)}`, {
@@ -1367,6 +1382,7 @@ tailwind.config = {
         new_car_id: newPlate,
         plate_display: newPlate,
         car_model: newModel,
+        car_specs: newSpecs,
         car_price: newPrice
       })
     });
@@ -1386,7 +1402,10 @@ tailwind.config = {
 
     document.getElementById('modal-car-plate-badge').textContent = meta.plate_display;
     document.getElementById('modal-car-title').textContent = meta.car_model;
-    document.getElementById('modal-car-count').textContent = `${photos.length} photo${photos.length === 1 ? '' : 's'} • ${meta.car_price}`;
+    const subParts = [`${photos.length} photo${photos.length === 1 ? '' : 's'}`];
+    if (meta.car_specs) subParts.push(meta.car_specs);
+    if (meta.car_price) subParts.push(meta.car_price);
+    document.getElementById('modal-car-count').textContent = subParts.join(' • ');
 
     const grid = document.getElementById('modal-photos-grid');
     if (photos.length === 0) {
@@ -1606,6 +1625,7 @@ tailwind.config = {
     const meta = getCarMeta(carId);
     document.getElementById('studio-model-input').value = meta.car_model;
     document.getElementById('studio-price-input').value = meta.car_price;
+    document.getElementById('studio-specs-input').value = meta.car_specs;
     switchTab('frames');
   }
 
@@ -1615,6 +1635,7 @@ tailwind.config = {
     const meta = getCarMeta(carId);
     document.getElementById('studio-model-input').value = meta.car_model;
     document.getElementById('studio-price-input').value = meta.car_price;
+    document.getElementById('studio-specs-input').value = meta.car_specs;
     switchTab('frames');
   }
 
@@ -1645,6 +1666,7 @@ tailwind.config = {
     const meta = getCarMeta(studioCarId);
     document.getElementById('studio-model-input').value = meta.car_model;
     document.getElementById('studio-price-input').value = meta.car_price;
+    document.getElementById('studio-specs-input').value = meta.car_specs;
     renderFramePhotoStrip();
     refreshStudioCanvas();
   }

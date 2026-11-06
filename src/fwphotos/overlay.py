@@ -48,16 +48,124 @@ def load_overlay_rgba(asset_path: Path) -> np.ndarray:
 
 
 def order_quad_corners(pts: np.ndarray) -> np.ndarray:
-    """Order 4 points consistently as [top-left, top-right, bottom-right, bottom-left]."""
-    pts = np.asarray(pts, dtype=np.float32).reshape(4, 2)
-    # Sort by y first (top 2 vs bottom 2)
-    y_sorted = pts[np.argsort(pts[:, 1])]
-    top_two = y_sorted[:2]
-    bottom_two = y_sorted[2:]
+    """Order 4 points consistently as [top-left, top-right, bottom-right, bottom-left].
 
-    tl, tr = top_two[np.argsort(top_two[:, 0])]
-    bl, br = bottom_two[np.argsort(bottom_two[:, 0])]
+    Works reliably even on steeply tilted 3/4-angle vehicle shots by splitting
+    left-two vs right-two points along X (since license plates are wider than tall)
+    and then ordering top vs bottom within each side.
+    """
+    pts = np.asarray(pts, dtype=np.float32).reshape(4, 2)
+    x_sorted = pts[np.argsort(pts[:, 0])]
+    left_two = x_sorted[:2]
+    right_two = x_sorted[2:]
+
+    tl, bl = left_two[np.argsort(left_two[:, 1])]
+    tr, br = right_two[np.argsort(right_two[:, 1])]
     return np.array([tl, tr, br, bl], dtype=np.float32)
+
+
+def _fit_quad_from_hull(hull_pts: np.ndarray) -> np.ndarray:
+    """Fit a 4-corner perspective quadrilateral to a convex hull of edge/plate points.
+
+    Uses directional extreme points (TL, TR, BR, BL) along rotated axes aligned
+    with the minimum-area bounding rectangle so angled plates preserve both their
+    tilt angle and perspective foreshortening.
+    """
+    rect = cv2.minAreaRect(hull_pts)
+    box = order_quad_corners(cv2.boxPoints(rect))
+    pts = hull_pts.reshape(-1, 2).astype(np.float32)
+    if len(pts) < 4:
+        return box
+
+    # Primary axis along the top/bottom edges of the minAreaRect
+    u_vec = box[1] - box[0]
+    u_len = float(np.linalg.norm(u_vec))
+    if u_len < 1e-3:
+        return box
+    u_unit = u_vec / u_len
+    v_unit = np.array([-u_unit[1], u_unit[0]], dtype=np.float32)
+
+    center = pts.mean(axis=0)
+    rel = pts - center
+    u_proj = rel @ u_unit
+    v_proj = rel @ v_unit
+
+    # Normalize projections so X and Y contribute equally to corner extremeness
+    u_span = max(1.0, float(u_proj.max() - u_proj.min()))
+    v_span = max(1.0, float(v_proj.max() - v_proj.min()))
+    u_norm = u_proj / u_span
+    v_norm = v_proj / v_span
+
+    tl = pts[int(np.argmin(u_norm + v_norm))]
+    tr = pts[int(np.argmax(u_norm - v_norm))]
+    br = pts[int(np.argmax(u_norm + v_norm))]
+    bl = pts[int(np.argmin(u_norm - v_norm))]
+    fitted = order_quad_corners(np.array([tl, tr, br, bl], dtype=np.float32))
+
+    # Blend 65% perspective-hull extremes with 35% minAreaRect to stabilize noisy corners
+    # while keeping the true tilt angle and perspective taper of the plate.
+    return order_quad_corners(0.65 * fitted + 0.35 * box)
+
+
+def _estimate_slant_quad_from_gradients(
+    gray: np.ndarray,
+    core_x1: int,
+    core_y1: int,
+    core_x2: int,
+    core_y2: int,
+) -> np.ndarray | None:
+    """Estimate a tilted parallelogram/trapezoid from horizontal plate edges and character baseline."""
+    roi = gray[core_y1:core_y2, core_x1:core_x2]
+    rh, rw = roi.shape[:2]
+    if rh < 8 or rw < 16:
+        return None
+
+    # Compute vertical gradient |dI/dy| which is strong along top/bottom plate borders and characters
+    gy = cv2.Sobel(roi, cv2.CV_32F, 0, 1, ksize=3)
+    abs_gy = np.abs(gy)
+    thresh = float(np.percentile(abs_gy, 82))
+    if thresh < 8.0:
+        return None
+
+    ys, xs = np.where(abs_gy >= thresh)
+    if len(xs) < 16:
+        return None
+
+    # Fit a line y = slope * x + intercept to the strong horizontal structure of the plate
+    vx, vy, x0, y0 = cv2.fitLine(
+        np.column_stack([xs, ys]).astype(np.float32),
+        cv2.DIST_L1,
+        0,
+        0.01,
+        0.01,
+    )
+    vx_f = float(vx[0]) if np.ndim(vx) > 0 else float(vx)
+    vy_f = float(vy[0]) if np.ndim(vy) > 0 else float(vy)
+    if abs(vx_f) < 1e-3:
+        return None
+
+    slope = vy_f / vx_f
+    # Clamp to realistic license plate camera tilt (up to ~35 degrees)
+    slope = float(np.clip(slope, -0.70, 0.70))
+    if abs(slope) < 0.015:
+        return None
+
+    # For each column slice, find the top and bottom vertical bounds along that tilted line
+    residuals = ys.astype(np.float32) - slope * (xs.astype(np.float32) - rw * 0.5)
+    top_res = float(np.percentile(residuals, 4))
+    bot_res = float(np.percentile(residuals, 96))
+    plate_thickness = max(rh * 0.55, bot_res - top_res)
+    mid_res = 0.5 * (top_res + bot_res)
+
+    half_t = 0.52 * plate_thickness
+    dy_left = slope * (0.0 - rw * 0.5)
+    dy_right = slope * (rw - rw * 0.5)
+
+    tl = [core_x1 + 0.0, core_y1 + mid_res + dy_left - half_t]
+    tr = [core_x1 + float(rw), core_y1 + mid_res + dy_right - half_t]
+    br = [core_x1 + float(rw), core_y1 + mid_res + dy_right + half_t]
+    bl = [core_x1 + 0.0, core_y1 + mid_res + dy_left + half_t]
+    return order_quad_corners(np.array([tl, tr, br, bl], dtype=np.float32))
 
 
 def expand_quad(
@@ -146,31 +254,67 @@ def estimate_plate_corners(
 
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, canny_low, canny_high)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    contours, _ = cv2.findContours(closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    # Multi-pass candidate extraction:
+    # 1) Canny edge closing
+    # 2) Adaptive local threshold (captures dark/light plate frames & character rows)
+    # 3) Otsu bright/dark plate region threshold
+    edges = cv2.Canny(blurred, canny_low, canny_high)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))
+    closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    adapt = cv2.adaptiveThreshold(
+        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 4
+    )
+    closed_adapt = cv2.morphologyEx(adapt, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    _, otsu_bright = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, otsu_dark = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
     candidate_quad: np.ndarray | None = None
-    for cnt in contours[:10]:
-        area = cv2.contourArea(cnt)
-        if area < crop_area * min_area_ratio or area > crop_area * max_area_ratio:
-            continue
 
-        peri = cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, eps_factor * peri, True)
-        if len(approx) == 4 and cv2.isContourConvex(approx):
-            candidate_quad = approx.reshape(4, 2).astype(np.float32)
+    for binary_map in (closed_edges, otsu_bright, otsu_dark, closed_adapt):
+        contours, _ = cv2.findContours(
+            binary_map, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE
+        )
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        for cnt in contours[:12]:
+            hull = cv2.convexHull(cnt)
+            area = cv2.contourArea(hull)
+            if area < crop_area * min_area_ratio or area > crop_area * max_area_ratio:
+                continue
+
+            peri = cv2.arcLength(hull, True)
+            for eps in (eps_factor, 0.03, 0.06, 0.09):
+                approx = cv2.approxPolyDP(hull, eps * peri, True)
+                if len(approx) == 4 and cv2.isContourConvex(approx):
+                    candidate_quad = approx.reshape(4, 2).astype(np.float32)
+                    break
+            if candidate_quad is not None:
+                break
+
+            # Fit directional 4-corner perspective quad from convex hull
+            rect = cv2.minAreaRect(hull)
+            box_pts = cv2.boxPoints(rect)
+            rect_area = cv2.contourArea(box_pts)
+            if crop_area * min_area_ratio <= rect_area <= crop_area * max_area_ratio:
+                candidate_quad = _fit_quad_from_hull(hull)
+                break
+        if candidate_quad is not None:
             break
 
-        rect = cv2.minAreaRect(cnt)
-        box_pts = cv2.boxPoints(rect)
-        rect_area = cv2.contourArea(box_pts)
-        if crop_area * min_area_ratio <= rect_area <= crop_area * max_area_ratio:
-            candidate_quad = box_pts.astype(np.float32)
-            break
+    # If single-contour extraction didn't find a valid quad, try gradient-based slant estimation
+    # inside the core bbox (catches angled plates where the outer plate frame blends with the bumper)
+    if candidate_quad is None:
+        core_x1 = x1 - cx1
+        core_y1 = y1 - cy1
+        core_x2 = x2 - cx1
+        core_y2 = y2 - cy1
+        slant_quad = _estimate_slant_quad_from_gradients(
+            blurred, core_x1, core_y1, core_x2, core_y2
+        )
+        if slant_quad is not None:
+            candidate_quad = slant_quad
 
     if candidate_quad is None:
         return padded_bbox_quad(bbox, pad_ratio, min_pad_px, img_w, img_h), "fallback"
@@ -179,13 +323,19 @@ def estimate_plate_corners(
     full_quad = order_quad_corners(candidate_quad + np.array([cx1, cy1], dtype=np.float32))
     expanded_quad = expand_quad(full_quad, pad_ratio, min_pad_px, img_w, img_h)
 
-    # Verify geometry sanity: width > height and covers core plate region
+    # Verify geometry sanity: spans the plate width and height even when tilted at 3/4 car angles
     top_w = float(np.linalg.norm(expanded_quad[1] - expanded_quad[0]))
     bot_w = float(np.linalg.norm(expanded_quad[2] - expanded_quad[3]))
     left_h = float(np.linalg.norm(expanded_quad[3] - expanded_quad[0]))
     right_h = float(np.linalg.norm(expanded_quad[2] - expanded_quad[1]))
+    x_span = float(expanded_quad[:, 0].max() - expanded_quad[:, 0].min())
+    y_span = float(expanded_quad[:, 1].max() - expanded_quad[:, 1].min())
 
-    if min(top_w, bot_w) < bw * 0.75 or min(left_h, right_h) < bh * 0.65:
+    if (
+        min(top_w, bot_w) < bw * 0.65
+        or x_span < bw * 0.72
+        or max(left_h, right_h, y_span) < bh * 0.45
+    ):
         return padded_bbox_quad(bbox, pad_ratio, min_pad_px, img_w, img_h), "fallback"
 
     return expanded_quad, "perspective"
@@ -304,3 +454,4 @@ def apply_plate_overlays(
         plates_covered=len(modes),
         modes=modes,
     )
+

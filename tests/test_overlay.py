@@ -77,3 +77,26 @@ def test_fallback_when_no_quad_edges_exist() -> None:
     assert result.summary_mode == "fallback"
     # Verify center pixel changed from uniform gray (120, 120, 120)
     assert not np.array_equal(result.image_bgr[130, 250], np.array([120, 120, 120]))
+
+
+def test_steep_three_quarter_tilted_plate_follows_tilt_angle() -> None:
+    """A steeply tilted 3/4-angle plate (where top-right corner is lower than bottom-left) preserves its tilt slope."""
+    img = np.full((420, 640, 3), (40, 42, 46), dtype=np.uint8)
+    # Steeply tilted plate: left side around y=160..210, right side around y=225..275
+    # Note that TR.y (225) > BL.y (210), which previously broke y-first corner sorting!
+    tilted_quad = np.array(
+        [[180, 160], [430, 225], [420, 275], [170, 210]], dtype=np.int32
+    )
+    cv2.fillConvexPoly(img, tilted_quad, (240, 240, 240))
+    cv2.polylines(img, [tilted_quad], True, (15, 15, 15), 2)
+
+    bbox = (170, 160, 430, 275)
+    settings = load_settings(Path("config/settings.yaml"))
+
+    est_quad, mode = estimate_plate_corners(img, bbox, settings["overlay"])
+    assert mode == "perspective"
+    # Top-right corner must be significantly lower (larger y) than top-left corner, matching the tilt
+    tl, tr, br, bl = est_quad
+    assert (tr[1] - tl[1]) > 35.0
+    assert (br[1] - bl[1]) > 35.0
+
