@@ -208,3 +208,108 @@ def test_multi_file_upload_and_aspect_ratio_crops(tmp_path: Path) -> None:
     assert zip_resp.headers["content-type"] == "application/zip"
 
 
+def test_apple_frame_studio_fit_blur_and_fill_templates(tmp_path: Path) -> None:
+    """Verify Frame Template Editor renders 1:1, 16:9, 9:16 in Fit (blurred BG) & Fill modes across all 5 Apple templates."""
+    client, _, output_dir, _ = _setup_review_fixture(tmp_path)
+    auth = ("reviewer", "s3cr3t-pass")
+
+    # Approve one image so output/SBA8888X/01_rear_angle.jpg exists
+    client.post("/api/approve/SBA8888X/01_rear_angle.jpg", auth=auth)
+
+    for style in ("clean_white", "soft_grey", "minimal_border", "rounded_card", "glass_overlay"):
+        for fit_mode in ("fit", "fill"):
+            resp = client.get(
+                f"/api/frame-render?car_id=SBA8888X&filename=01_rear_angle.jpg"
+                f"&ratio=1:1&fit_mode={fit_mode}&template_style={style}"
+                f"&offset_x=0.35&offset_y=0.65&caption=1&car_model=Porsche+911&car_price=$248,900",
+                auth=auth,
+            )
+            assert resp.status_code == 200
+            assert resp.headers["content-type"] == "image/jpeg"
+            assert resp.content[:2] == b"\xff\xd8"
+
+    # Save framed image to Gallery
+    save_resp = client.post(
+        "/api/frame-save",
+        json={
+            "car_id": "SBA8888X",
+            "filename": "01_rear_angle.jpg",
+            "ratio": "16:9",
+            "fit_mode": "fit",
+            "template_style": "rounded_card",
+            "caption": True,
+            "car_model": "2023 Porsche 911 GT3",
+            "car_price": "$248,900",
+        },
+        auth=auth,
+    )
+    assert save_resp.status_code == 200
+    saved_name = save_resp.json()["saved_filename"]
+    assert (output_dir / "SBA8888X" / saved_name).exists()
+
+
+def test_car_management_edit_and_delete_scopes(tmp_path: Path) -> None:
+    """Verify editing car group metadata, single delete, multi-select delete, car group delete, and delete all."""
+    client, review_dir, output_dir, _ = _setup_review_fixture(tmp_path)
+    auth = ("reviewer", "s3cr3t-pass")
+
+    # Add a second car group in output_dir
+    car2 = output_dir / "SXX1234A"
+    car2.mkdir(parents=True)
+    sample_img = np.full((180, 260, 3), (100, 120, 140), dtype=np.uint8)
+    cv2.imwrite(str(car2 / "a.jpg"), sample_img)
+    cv2.imwrite(str(car2 / "b.jpg"), sample_img)
+    cv2.imwrite(str(car2 / "c.jpg"), sample_img)
+
+    # 1. Edit car group metadata & rename SXX1234A -> SXX9999Z
+    edit_resp = client.put(
+        "/api/cars/SXX1234A",
+        json={
+            "new_car_id": "SXX9999Z",
+            "plate_display": "SXX 9999 Z",
+            "car_model": "BMW M3 Touring",
+            "car_price": "$312,000",
+        },
+        auth=auth,
+    )
+    assert edit_resp.status_code == 200
+    assert edit_resp.json()["car_id"] == "SXX9999Z"
+    assert (output_dir / "SXX9999Z" / "a.jpg").exists()
+
+    # 2. Multi-select delete two photos (a.jpg and b.jpg)
+    del_sel = client.post(
+        "/api/delete",
+        json={
+            "scope": "selected",
+            "items": [
+                {"car_id": "SXX9999Z", "filename": "a.jpg"},
+                {"car_id": "SXX9999Z", "filename": "b.jpg"},
+            ],
+        },
+        auth=auth,
+    )
+    assert del_sel.status_code == 200
+    assert del_sel.json()["deleted_photos"] == 2
+    assert not (output_dir / "SXX9999Z" / "a.jpg").exists()
+    assert (output_dir / "SXX9999Z" / "c.jpg").exists()
+
+    # 3. Delete entire car group SXX9999Z
+    del_car = client.post(
+        "/api/delete",
+        json={"scope": "car", "car_id": "SXX9999Z"},
+        auth=auth,
+    )
+    assert del_car.status_code == 200
+    assert not (output_dir / "SXX9999Z").exists()
+
+    # 4. Delete all photos in inventory
+    del_all = client.post(
+        "/api/delete",
+        json={"scope": "all"},
+        auth=auth,
+    )
+    assert del_all.status_code == 200
+    assert not (review_dir / "SBA8888X").exists()
+
+
+

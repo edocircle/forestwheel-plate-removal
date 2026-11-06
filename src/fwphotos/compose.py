@@ -9,7 +9,7 @@ from typing import Any
 import cv2
 import numpy as np
 import yaml
-from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -166,3 +166,227 @@ def compose_template(
             draw.text((tx, ty), text_str, fill=color, font=font)
 
     return canvas
+
+
+def render_apple_frame_studio(
+    image_bgr: np.ndarray,
+    ratio: str = "1:1",
+    fit_mode: str = "fit",
+    template_style: str = "clean_white",
+    offset_x: float = 0.5,
+    offset_y: float = 0.5,
+    caption_enabled: bool = True,
+    car_model: str = "",
+    car_price: str = "",
+    car_specs: str = "",
+) -> Image.Image:
+    """Render a car photo inside the Apple-style Frame Template Editor.
+
+    Args:
+        image_bgr: Plate-covered vehicle image in BGR format.
+        ratio: Aspect ratio ('1:1', '16:9', or '9:16').
+        fit_mode:
+          - 'fit' (Fit to frame): whole photo is visible, and empty space is filled
+            with a blurred, enlarged copy of the same photo as background.
+          - 'fill' (Fill frame): photo is cropped to cover the whole frame, with
+            offset_x / offset_y (0.0 to 1.0) controlling pan/reposition.
+        template_style: One of 'clean_white', 'soft_grey', 'minimal_border',
+            'rounded_card', or 'glass_overlay'.
+        offset_x: Horizontal crop centering (0.0 = left, 0.5 = center, 1.0 = right).
+        offset_y: Vertical crop centering (0.0 = top, 0.5 = center, 1.0 = bottom).
+        caption_enabled: Whether to render the optional model/price caption area.
+        car_model: Vehicle title (e.g. '2023 Porsche 911 GT3').
+        car_price: Vehicle price (e.g. '$248,900').
+        car_specs: Optional subtitle/specs (e.g. '4,200 mi • PDK • Shark Blue').
+    """
+    r_clean = ratio.strip()
+    if r_clean == "16:9":
+        canvas_w, canvas_h = 1920, 1080
+    elif r_clean == "9:16":
+        canvas_w, canvas_h = 1080, 1920
+    else:
+        canvas_w, canvas_h = 1080, 1080
+
+    style = template_style.strip().lower()
+    mode = fit_mode.strip().lower()
+    cx = max(0.0, min(1.0, float(offset_x)))
+    cy = max(0.0, min(1.0, float(offset_y)))
+
+    rgb_arr = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    photo_pil = Image.fromarray(rgb_arr)
+
+    # Determine inner photo viewport and outer surface based on Apple template style
+    caption_h = 116 if (caption_enabled and (car_model or car_price) and style in ("clean_white", "soft_grey", "rounded_card")) else 0
+
+    if style == "clean_white":
+        bg_color = (255, 255, 255)
+        pad = 36
+    elif style == "soft_grey":
+        bg_color = (240, 237, 239)
+        pad = 40
+    elif style == "minimal_border":
+        bg_color = (252, 248, 251)
+        pad = 24
+    elif style == "rounded_card":
+        bg_color = (246, 243, 245)
+        pad = 52
+    else:
+        # glass_overlay uses full-bleed canvas
+        bg_color = (252, 248, 251)
+        pad = 0
+
+    canvas = Image.new("RGB", (canvas_w, canvas_h), bg_color)
+    box_x1 = pad
+    box_y1 = pad
+    box_x2 = canvas_w - pad
+    box_y2 = canvas_h - pad - caption_h
+    box_w = max(1, box_x2 - box_x1)
+    box_h = max(1, box_y2 - box_y1)
+
+    # Build the photo viewport image according to fit_mode ("fit" vs "fill")
+    if mode == "fill":
+        viewport_img = ImageOps.fit(
+            photo_pil,
+            (box_w, box_h),
+            method=Image.Resampling.LANCZOS,
+            centering=(cx, cy),
+        )
+    else:
+        # "Fit to frame": enlarged + Gaussian blurred copy of the same photo fills empty space
+        blurred_bg = ImageOps.fit(
+            photo_pil,
+            (box_w, box_h),
+            method=Image.Resampling.BILINEAR,
+            centering=(0.5, 0.5),
+        ).filter(ImageFilter.GaussianBlur(radius=32))
+        # Slightly brighten/soften the blurred backdrop for Apple studio aesthetic
+        soft_overlay = Image.new("RGB", (box_w, box_h), (255, 255, 255))
+        viewport_img = Image.blend(blurred_bg, soft_overlay, alpha=0.14)
+
+        contained = ImageOps.contain(
+            photo_pil,
+            (box_w, box_h),
+            method=Image.Resampling.LANCZOS,
+        )
+        paste_x = (box_w - contained.width) // 2
+        paste_y = (box_h - contained.height) // 2
+        viewport_img.paste(contained, (paste_x, paste_y))
+
+    # Apply rounded corners to viewport if style is rounded_card or clean_white/soft_grey
+    if style in ("rounded_card", "clean_white", "soft_grey") and pad > 0:
+        radius = 32 if style == "rounded_card" else 20
+        mask = Image.new("L", (box_w, box_h), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rounded_rectangle([0, 0, box_w - 1, box_h - 1], radius=radius, fill=255)
+        canvas.paste(viewport_img, (box_x1, box_y1), mask=mask)
+    else:
+        canvas.paste(viewport_img, (box_x1, box_y1))
+
+    draw = ImageDraw.Draw(canvas, "RGBA")
+
+    # Style-specific borders and overlays
+    if style == "minimal_border":
+        draw.rectangle(
+            [pad, pad, canvas_w - 1 - pad, canvas_h - 1 - pad],
+            outline=(27, 27, 29, 255),
+            width=3,
+        )
+        draw.rectangle(
+            [pad + 14, pad + 14, canvas_w - 1 - pad - 14, canvas_h - 1 - pad - 14],
+            outline=(255, 255, 255, 190),
+            width=2,
+        )
+
+    # Render optional caption (car model, specs, price)
+    if caption_enabled and (car_model.strip() or car_price.strip()):
+        title_font = _load_font(None, 32)
+        sub_font = _load_font(None, 20)
+        price_font = _load_font(None, 34)
+
+        model_txt = car_model.strip()
+        price_txt = car_price.strip()
+        specs_txt = car_specs.strip() or "Forest Wheel Verified Showroom"
+
+        if style in ("glass_overlay", "minimal_border"):
+            # Floating frosted glass pill at the bottom of the frame
+            bar_margin = 44
+            bar_h = 112
+            bar_y1 = canvas_h - bar_margin - bar_h
+            bar_y2 = canvas_h - bar_margin
+            bar_x1 = bar_margin
+            bar_x2 = canvas_w - bar_margin
+
+            draw.rounded_rectangle(
+                [bar_x1, bar_y1, bar_x2, bar_y2],
+                radius=24,
+                fill=(255, 255, 255, 218),
+                outline=(255, 255, 255, 245),
+                width=2,
+            )
+            if model_txt:
+                draw.text(
+                    (bar_x1 + 28, bar_y1 + 22),
+                    model_txt,
+                    fill=(27, 27, 29, 255),
+                    font=title_font,
+                )
+            if specs_txt:
+                draw.text(
+                    (bar_x1 + 28, bar_y1 + 64),
+                    specs_txt,
+                    fill=(65, 71, 85, 255),
+                    font=sub_font,
+                )
+            if price_txt:
+                try:
+                    draw.text(
+                        (bar_x2 - 28, bar_y1 + 56),
+                        price_txt,
+                        fill=(0, 88, 188, 255),
+                        font=price_font,
+                        anchor="rm",
+                    )
+                except ValueError:
+                    draw.text(
+                        (bar_x2 - 200, bar_y1 + 36),
+                        price_txt,
+                        fill=(0, 88, 188, 255),
+                        font=price_font,
+                    )
+        else:
+            # Clean studio footer below the photo
+            footer_y = box_y2 + 20
+            if model_txt:
+                draw.text(
+                    (box_x1 + 8, footer_y),
+                    model_txt,
+                    fill=(27, 27, 29, 255),
+                    font=title_font,
+                )
+            if specs_txt:
+                draw.text(
+                    (box_x1 + 8, footer_y + 42),
+                    specs_txt,
+                    fill=(113, 119, 134, 255),
+                    font=sub_font,
+                )
+            if price_txt:
+                try:
+                    draw.text(
+                        (box_x2 - 8, footer_y + 34),
+                        price_txt,
+                        fill=(0, 88, 188, 255),
+                        font=price_font,
+                        anchor="rm",
+                    )
+                except ValueError:
+                    draw.text(
+                        (box_x2 - 180, footer_y + 16),
+                        price_txt,
+                        fill=(0, 88, 188, 255),
+                        font=price_font,
+                    )
+
+    return canvas
+
+

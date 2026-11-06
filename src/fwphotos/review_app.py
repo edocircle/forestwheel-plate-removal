@@ -31,7 +31,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from PIL import Image
 
-from fwphotos.compose import compose_template, load_template_config
+from fwphotos.compose import (
+    compose_template,
+    load_template_config,
+    render_apple_frame_studio,
+)
 from fwphotos.detect import (
     PlateDetector,
     list_supported_images,
@@ -234,6 +238,7 @@ def create_review_app(
     state_file = Path(
         state_file_override or paths_cfg.get("state_file", "data/processed_state.json")
     )
+    cars_meta_file = state_file.parent / "cars_metadata.json"
     car_state_file_cfg = sync_cfg.get("car_state_file")
     car_state_dir = Path(car_state_file_cfg).parent if car_state_file_cfg else state_file.parent
 
@@ -402,11 +407,12 @@ def create_review_app(
 
     @app.get("/api/state")
     def api_state(_user: str = Depends(verify_auth)) -> JSONResponse:
-        """Return complete state of both output/ and review/ car galleries."""
+        """Return complete state of both output/ and review/ car galleries plus car metadata."""
         return JSONResponse(
             content={
                 "cars_output": _discover_folder_tree(output_dir, is_review=False),
                 "cars_review": _discover_folder_tree(review_dir, is_review=True),
+                "cars_meta": _load_json_dict(cars_meta_file),
             }
         )
 
@@ -414,12 +420,29 @@ def create_review_app(
     async def api_upload(
         car_id: str = Form("FW-BATCH"),
         ratio: str = Form("16:9"),
+        car_model: str = Form(""),
+        car_price: str = Form(""),
+        car_specs: str = Form(""),
+        masking_style: str = Form("clean_blank"),
         files: list[UploadFile] = File(...),
         _user: str = Depends(verify_auth),
     ) -> JSONResponse:
         """Accept multiple uploaded vehicle photos, cover plates, and compose into selected ratio."""
         clean_cid = _sanitize_car_id(car_id)
         profile_name = resolve_ratio_profile(ratio, default_profile="ratio_16_9")
+
+        # Save car metadata (plate display string, model, price, specs, masking style)
+        all_meta = _load_json_dict(cars_meta_file)
+        cur_meta = all_meta.get(clean_cid, {})
+        all_meta[clean_cid] = {
+            "plate_display": car_id.strip() or clean_cid,
+            "car_model": car_model.strip() or cur_meta.get("car_model", f"Vehicle {clean_cid}"),
+            "car_price": car_price.strip() or cur_meta.get("car_price", "$188,800"),
+            "car_specs": car_specs.strip() or cur_meta.get("car_specs", "Verified Showroom • Auto"),
+            "masking_style": masking_style.strip() or cur_meta.get("masking_style", "clean_blank"),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_json_dict(cars_meta_file, all_meta)
 
         car_inbox = inbox_dir / clean_cid
         car_out = output_dir / clean_cid
@@ -737,6 +760,406 @@ def create_review_app(
                 "car_id": car_id,
                 "filename": filename,
                 "status": "rejected",
+            }
+        )
+
+    @app.get("/media/original/{car_id}/{filename}")
+    def media_original(
+        car_id: str,
+        filename: str,
+        _user: str = Depends(verify_auth),
+    ) -> Response:
+        """Serve authenticated original ('Before' plate removal) thumbnail for any car in Gallery."""
+        safe_car = _validate_path_segment(car_id)
+        safe_name = _validate_path_segment(filename)
+        stem = Path(safe_name).stem
+
+        # Search inbox/<car_id>, review/<car_id>, data/test_photos, and output/<car_id>
+        search_dirs = [
+            inbox_dir if safe_car == "_root" else (inbox_dir / safe_car),
+            review_dir if safe_car == "_root" else (review_dir / safe_car),
+            Path(paths_cfg.get("input_dir", "data/test_photos")),
+            output_dir if safe_car == "_root" else (output_dir / safe_car),
+        ]
+        found_path: Path | None = None
+        for sdir in search_dirs:
+            if not sdir.exists():
+                continue
+            exact = sdir / safe_name
+            if exact.is_file():
+                found_path = exact
+                break
+            for ext in supported_exts:
+                cand = sdir / f"{stem}{ext}"
+                if cand.is_file():
+                    found_path = cand
+                    break
+            if found_path:
+                break
+
+        if found_path is None:
+            raise HTTPException(status_code=404, detail="Original image not found.")
+
+        bgr = load_image_bgr(found_path)
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=thumb_width)
+        return Response(
+            content=jpeg_bytes,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.get("/media/clean/{car_id}/{filename}")
+    def media_clean(
+        car_id: str,
+        filename: str,
+        _user: str = Depends(verify_auth),
+    ) -> Response:
+        """Serve authenticated plate-removed ('After' plate removal, frameless) image for Gallery & Frame Studio."""
+        safe_car = _validate_path_segment(car_id)
+        safe_name = _validate_path_segment(filename)
+        stem = Path(safe_name).stem
+
+        covered_bgr = _find_plate_covered_base(safe_car, stem)
+        if covered_bgr is None:
+            # Check review_dir or output_dir
+            for base_d in (review_dir, output_dir):
+                target_d = base_d if safe_car == "_root" else (base_d / safe_car)
+                cand = target_d / safe_name
+                if cand.is_file():
+                    bgr = load_image_bgr(cand)
+                    dets = _get_detector().detect_array(bgr, min_conf=low_conf_floor)
+                    if dets:
+                        covered_bgr = apply_plate_overlays(bgr, dets, settings, overlay_bgra).image_bgr
+                    else:
+                        covered_bgr = bgr
+                    break
+
+        if covered_bgr is None:
+            raise HTTPException(status_code=404, detail="Plate-removed image not found.")
+
+        rgb = cv2.cvtColor(covered_bgr, cv2.COLOR_BGR2RGB)
+        jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=thumb_width)
+        return Response(
+            content=jpeg_bytes,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.put("/api/cars/{car_id}")
+    def api_update_car(
+        car_id: str,
+        payload: dict[str, Any] = Body(...),
+        user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Edit or rename a car group (plate number tag, car model, price, specs)."""
+        safe_car = _validate_path_segment(car_id)
+        new_raw_id = str(payload.get("new_car_id", safe_car)).strip()
+        new_cid = _sanitize_car_id(new_raw_id) if new_raw_id != "_root" else "_root"
+
+        all_meta = _load_json_dict(cars_meta_file)
+        existing_meta = all_meta.pop(safe_car, {})
+
+        # If folder slug changed, rename folders across output_dir, review_dir, inbox_dir, and _covered_cache
+        if new_cid != safe_car and safe_car != "_root" and new_cid != "_root":
+            for folder_root in (
+                output_dir,
+                review_dir,
+                inbox_dir,
+                output_dir / "_covered_cache",
+            ):
+                src_f = folder_root / safe_car
+                dst_f = folder_root / new_cid
+                if src_f.exists():
+                    dst_f.parent.mkdir(parents=True, exist_ok=True)
+                    if dst_f.exists():
+                        for item in src_f.iterdir():
+                            shutil.move(str(item), str(dst_f / item.name))
+                        shutil.rmtree(src_f, ignore_errors=True)
+                    else:
+                        src_f.rename(dst_f)
+
+            # Rename per-car state file if present
+            old_state = state_file.parent / f"images_{safe_car}.json"
+            new_state = state_file.parent / f"images_{new_cid}.json"
+            if old_state.exists():
+                old_state.rename(new_state)
+
+        all_meta[new_cid] = {
+            "plate_display": str(payload.get("plate_display", new_raw_id or new_cid)).strip(),
+            "car_model": str(payload.get("car_model", existing_meta.get("car_model", ""))).strip(),
+            "car_price": str(payload.get("car_price", existing_meta.get("car_price", ""))).strip(),
+            "car_specs": str(payload.get("car_specs", existing_meta.get("car_specs", ""))).strip(),
+            "masking_style": str(payload.get("masking_style", existing_meta.get("masking_style", "clean_blank"))).strip(),
+            "updated_by": user,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_json_dict(cars_meta_file, all_meta)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "old_car_id": safe_car,
+                "car_id": new_cid,
+                "meta": all_meta[new_cid],
+            }
+        )
+
+    def _delete_single_photo_files(cid: str, fname: str) -> int:
+        """Delete a single photo from output/, review/, inbox/, and _covered_cache/ (never touching data/test_photos)."""
+        safe_c = _validate_path_segment(cid)
+        safe_f = _validate_path_segment(fname)
+        stem = Path(safe_f).stem
+        removed = 0
+
+        for base_d in (output_dir, review_dir, inbox_dir):
+            target_d = base_d if safe_c == "_root" else (base_d / safe_c)
+            if not target_d.exists():
+                continue
+            exact = target_d / safe_f
+            if exact.is_file():
+                exact.unlink()
+                removed += 1
+            for ext in supported_exts:
+                cand = target_d / f"{stem}{ext}"
+                if cand.is_file():
+                    cand.unlink()
+                    removed += 1
+            # Clean up empty car folder
+            if safe_c != "_root" and target_d.exists() and not any(target_d.iterdir()):
+                shutil.rmtree(target_d, ignore_errors=True)
+
+        cache_f = output_dir / "_covered_cache" / safe_c / f"{stem}.jpg"
+        if cache_f.is_file():
+            cache_f.unlink()
+
+        return 1 if removed > 0 else 0
+
+    def _delete_entire_car_group(cid: str) -> int:
+        """Delete an entire car group across output/, review/, inbox/, and metadata."""
+        safe_c = _validate_path_segment(cid)
+        count = 0
+        for base_d in (output_dir, review_dir):
+            target_d = base_d if safe_c == "_root" else (base_d / safe_c)
+            if target_d.exists():
+                imgs = list_supported_images(target_d, supported_exts)
+                count += len(imgs)
+                if safe_c == "_root":
+                    for p in imgs:
+                        p.unlink(missing_ok=True)
+                else:
+                    shutil.rmtree(target_d, ignore_errors=True)
+
+        if safe_c != "_root":
+            for extra_d in (inbox_dir / safe_c, output_dir / "_covered_cache" / safe_c):
+                if extra_d.exists():
+                    shutil.rmtree(extra_d, ignore_errors=True)
+            car_st = state_file.parent / f"images_{safe_c}.json"
+            if car_st.exists():
+                car_st.unlink(missing_ok=True)
+
+        all_meta = _load_json_dict(cars_meta_file)
+        if safe_c in all_meta:
+            all_meta.pop(safe_c, None)
+            _save_json_dict(cars_meta_file, all_meta)
+
+        return count
+
+    @app.post("/api/delete")
+    def api_delete(
+        payload: dict[str, Any] = Body(...),
+        user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Delete single photo, multi-selected photos, an entire car group, or all photos in inventory.
+
+        Supported payload formats:
+        - {"scope": "selected", "items": [{"car_id": "SXX1234A", "filename": "01.jpg"}, ...]}
+        - {"scope": "car", "car_id": "SXX1234A"} or {"scope": "car", "car_ids": ["SXX1234A", ...]}
+        - {"scope": "all"}
+        """
+        scope = str(payload.get("scope", "selected")).strip().lower()
+        deleted_photos = 0
+        deleted_cars: list[str] = []
+
+        if scope == "all":
+            out_tree = _discover_folder_tree(output_dir, is_review=False)
+            rev_tree = _discover_folder_tree(review_dir, is_review=True)
+            all_cids = sorted(set(out_tree.keys()) | set(rev_tree.keys()))
+            for cid in all_cids:
+                deleted_photos += _delete_entire_car_group(cid)
+                deleted_cars.append(cid)
+            _save_json_dict(cars_meta_file, {})
+            _save_json_dict(decisions_file, {})
+        elif scope == "car":
+            cids: list[str] = []
+            if "car_ids" in payload and isinstance(payload["car_ids"], list):
+                cids.extend(str(c) for c in payload["car_ids"] if c)
+            if "car_id" in payload and payload["car_id"]:
+                cids.append(str(payload["car_id"]))
+            for cid in sorted(set(cids)):
+                deleted_photos += _delete_entire_car_group(cid)
+                deleted_cars.append(cid)
+        else:
+            items = payload.get("items", [])
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict) and item.get("car_id") and item.get("filename"):
+                        deleted_photos += _delete_single_photo_files(
+                            str(item["car_id"]), str(item["filename"])
+                        )
+
+        logger.info(
+            "Delete action scope=%s removed %d photos (cars=%s) by %s",
+            scope,
+            deleted_photos,
+            deleted_cars,
+            user,
+        )
+        return JSONResponse(
+            content={
+                "ok": True,
+                "scope": scope,
+                "deleted_photos": deleted_photos,
+                "deleted_cars": deleted_cars,
+            }
+        )
+
+    def _resolve_covered_bgr_for_frame(car_id: str | None, filename: str | None) -> np.ndarray:
+        """Resolve the plate-covered vehicle image for Frame Template Editor."""
+        if car_id and filename:
+            safe_car = _validate_path_segment(car_id)
+            safe_name = _validate_path_segment(filename)
+            stem = Path(safe_name).stem
+            covered = _find_plate_covered_base(safe_car, stem)
+            if covered is not None:
+                return covered
+            for base_d in (output_dir, review_dir):
+                target_d = base_d if safe_car == "_root" else (base_d / safe_car)
+                cand = target_d / safe_name
+                if cand.is_file():
+                    bgr = load_image_bgr(cand)
+                    dets = _get_detector().detect_array(bgr, min_conf=low_conf_floor)
+                    if dets:
+                        return apply_plate_overlays(bgr, dets, settings, overlay_bgra).image_bgr
+                    return bgr
+
+        # Fallback to first available car photo in output_dir or data/test_photos
+        out_tree = _discover_folder_tree(output_dir, is_review=False)
+        for cid, items in out_tree.items():
+            if items:
+                first_f = items[0]["filename"]
+                covered = _find_plate_covered_base(cid, Path(first_f).stem)
+                if covered is not None:
+                    return covered
+                cand = (output_dir if cid == "_root" else (output_dir / cid)) / first_f
+                if cand.is_file():
+                    return load_image_bgr(cand)
+
+        sample_candidates = list_supported_images(
+            Path(paths_cfg.get("input_dir", "data/test_photos")), supported_exts
+        )
+        if sample_candidates:
+            sample_bgr = load_image_bgr(sample_candidates[0])
+            dets = _get_detector().detect_array(sample_bgr, min_conf=low_conf_floor)
+            if dets:
+                return apply_plate_overlays(sample_bgr, dets, settings, overlay_bgra).image_bgr
+            return sample_bgr
+
+        return np.full((720, 1280, 3), (225, 230, 238), dtype=np.uint8)
+
+    @app.get("/api/frame-render")
+    def api_frame_render(
+        car_id: str | None = Query(default=None),
+        filename: str | None = Query(default=None),
+        ratio: str = Query("1:1"),
+        fit_mode: str = Query("fit"),
+        template_style: str = Query("clean_white"),
+        offset_x: float = Query(0.5),
+        offset_y: float = Query(0.5),
+        caption: int = Query(1),
+        car_model: str = Query(""),
+        car_price: str = Query(""),
+        car_specs: str = Query(""),
+        download: int = Query(0),
+        _user: str = Depends(verify_auth),
+    ) -> Response:
+        """Render an Apple-style Frame Studio image (1:1, 16:9, 9:16; Fit with blur vs Fill with pan; 5 templates)."""
+        bgr = _resolve_covered_bgr_for_frame(car_id, filename)
+        rendered_pil = render_apple_frame_studio(
+            image_bgr=bgr,
+            ratio=ratio,
+            fit_mode=fit_mode,
+            template_style=template_style,
+            offset_x=offset_x,
+            offset_y=offset_y,
+            caption_enabled=bool(caption),
+            car_model=car_model,
+            car_price=car_price,
+            car_specs=car_specs,
+        )
+        max_w = 0 if download else 1080
+        jpeg_bytes = _pil_to_jpeg_bytes(rendered_pil, max_width=max_w, quality=jpeg_quality)
+        headers = {"Cache-Control": "private, no-store"}
+        if download:
+            safe_c = _sanitize_car_id(car_id or "Showroom")
+            r_slug = ratio.replace(":", "x")
+            headers["Content-Disposition"] = (
+                f'attachment; filename="{safe_c}_{template_style}_{r_slug}.jpg"'
+            )
+        return Response(content=jpeg_bytes, media_type="image/jpeg", headers=headers)
+
+    @app.post("/api/frame-save")
+    def api_frame_save(
+        payload: dict[str, Any] = Body(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Save a framed studio photo directly into the car's Gallery (output/<car_id>/)."""
+        raw_cid = str(payload.get("car_id") or "FW-STUDIO")
+        safe_car = _validate_path_segment(raw_cid) if raw_cid == "_root" else _sanitize_car_id(raw_cid)
+        filename = str(payload.get("filename") or "studio.jpg")
+        ratio = str(payload.get("ratio") or "1:1")
+        fit_mode = str(payload.get("fit_mode") or "fit")
+        template_style = str(payload.get("template_style") or "clean_white")
+        offset_x = float(payload.get("offset_x", 0.5))
+        offset_y = float(payload.get("offset_y", 0.5))
+        caption_enabled = bool(payload.get("caption", True))
+        car_model = str(payload.get("car_model") or "")
+        car_price = str(payload.get("car_price") or "")
+        car_specs = str(payload.get("car_specs") or "")
+
+        bgr = _resolve_covered_bgr_for_frame(safe_car, filename)
+        rendered_pil = render_apple_frame_studio(
+            image_bgr=bgr,
+            ratio=ratio,
+            fit_mode=fit_mode,
+            template_style=template_style,
+            offset_x=offset_x,
+            offset_y=offset_y,
+            caption_enabled=caption_enabled,
+            car_model=car_model,
+            car_price=car_price,
+            car_specs=car_specs,
+        )
+
+        target_dir = output_dir if safe_car == "_root" else (output_dir / safe_car)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        stem = Path(filename).stem
+        r_slug = ratio.replace(":", "x")
+        out_name = f"{stem}_frame_{template_style}_{r_slug}.jpg"
+        out_path = target_dir / out_name
+        rendered_pil.convert("RGB").save(out_path, format="JPEG", quality=jpeg_quality)
+
+        # Cache the unframed plate-covered base for the new saved file too
+        cache_f = output_dir / "_covered_cache" / safe_car / f"{Path(out_name).stem}.jpg"
+        cache_f.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(cache_f), bgr)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "car_id": safe_car,
+                "saved_filename": out_name,
+                "output_path": str(out_path),
             }
         )
 
