@@ -723,6 +723,11 @@ tailwind.config = {
           <button type="button" onclick="setModalCompareMode('before')" id="modal-btn-before" class="px-3.5 py-1 rounded-full text-xs font-semibold text-on-surface-variant">Original (Before)</button>
         </div>
 
+        <button type="button" onclick="downloadCarZip(activeModalCarId, event)" class="px-3 py-1.5 rounded-full bg-primary-fixed hover:bg-primary hover:text-white text-primary text-xs font-semibold flex items-center gap-1 transition-colors">
+          <span class="material-symbols-outlined text-[16px]">download</span>
+          <span>Download ZIP</span>
+        </button>
+
         <button type="button" onclick="openDeleteModal('car', activeModalCarId)" class="px-3 py-1.5 rounded-full bg-error-container/50 hover:bg-error-container text-error text-xs font-semibold flex items-center gap-1">
           <span class="material-symbols-outlined text-[16px]">delete</span>
           <span>Delete Group</span>
@@ -880,7 +885,7 @@ tailwind.config = {
   };
   let activeTab = 'upload';
   let uploadFilesQueue = [];
-  let uploadRatio = '16:9';
+  let uploadRatio = '1:1';
 
   // Gallery & Selection State
   let galleryFilter = 'all';
@@ -1305,7 +1310,7 @@ tailwind.config = {
     const fn = encodeURIComponent(photoObj.filename);
     const cid = encodeURIComponent(carId);
     const fullParam = fullRes ? '&full=1' : '';
-    const activeRatio = encodeURIComponent(studioRatio || uploadRatio || '16:9');
+    const activeRatio = encodeURIComponent(studioRatio || uploadRatio || '1:1');
     if (compareMode === 'before') {
       return `/media/original/${cid}/${fn}?full=${fullRes ? 1 : 0}`;
     }
@@ -1313,6 +1318,24 @@ tailwind.config = {
       return `/media/output/${cid}/${fn}?ratio=${activeRatio}${fullParam}`;
     }
     return `/media/after/${cid}/${fn}?ratio=${activeRatio}${fullParam}`;
+  }
+
+  function getCarExportZipUrl(carId) {
+    const params = new URLSearchParams({
+      ratio: studioRatio || uploadRatio || '1:1',
+      fit_mode: studioFitMode || 'fit',
+      template_style: studioTemplate || 'clean_white'
+    });
+    return `/api/export/${encodeURIComponent(carId)}?${params.toString()}`;
+  }
+
+  function downloadCarZip(carId, ev) {
+    if (ev) {
+      ev.stopPropagation();
+      ev.preventDefault();
+    }
+    if (!carId) return;
+    window.location.href = getCarExportZipUrl(carId);
   }
 
   function openPhotoFullWindow(carId, filename, status, compareMode, ev) {
@@ -1446,7 +1469,7 @@ tailwind.config = {
                 <span class="material-symbols-outlined text-[16px]">crop_free</span>
                 <span>Frame Studio</span>
               </button>
-              <a href="/api/export/${encodeURIComponent(cid)}?ratio=16:9" class="text-on-surface-variant hover:text-primary flex items-center gap-1">
+              <a href="${getCarExportZipUrl(cid)}" onclick="downloadCarZip('${cid}', event)" class="text-on-surface-variant hover:text-primary flex items-center gap-1">
                 <span class="material-symbols-outlined text-[16px]">download</span>
                 <span>ZIP</span>
               </a>

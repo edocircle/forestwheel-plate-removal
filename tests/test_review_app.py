@@ -510,6 +510,44 @@ def test_multi_select_approve_and_remove_plate_cover_in_frame_studio(tmp_path: P
         assert not (review_dir / "SBA8888X" / fn).exists()
 
 
+def test_gallery_export_zip_follows_frames_page_config(tmp_path: Path) -> None:
+    """Verify Gallery ZIP download follows the 1:1 Fit to frame configuration set on the Frames page."""
+    import io
+    import zipfile
+    from PIL import Image
+
+    client, _, output_dir, _ = _setup_review_fixture(tmp_path)
+    auth = ("reviewer", "s3cr3t-pass")
+
+    # Configure Frames page to 1:1 Fit to frame
+    cfg_resp = client.post(
+        "/api/frame-config",
+        json={
+            "ratio": "1:1",
+            "fit_mode": "fit",
+            "template_style": "clean_white",
+            "caption_enabled": True,
+        },
+        auth=auth,
+    )
+    assert cfg_resp.status_code == 200
+
+    # Approve image into Gallery
+    client.post("/api/approve/SBA8888X/01_rear_angle.jpg", auth=auth)
+
+    # Download ZIP from Gallery without hardcoded 16:9 override
+    zip_resp = client.get("/api/export/SBA8888X", auth=auth)
+    assert zip_resp.status_code == 200
+    assert "SBA8888X_1x1_export.zip" in zip_resp.headers.get("content-disposition", "")
+
+    with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
+        names = zf.namelist()
+        assert "01_rear_angle_1x1.jpg" in names
+        with Image.open(io.BytesIO(zf.read("01_rear_angle_1x1.jpg"))) as exported_img:
+            assert exported_img.size[0] == exported_img.size[1]
+
+
+
 
 
 

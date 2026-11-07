@@ -258,10 +258,10 @@ def create_review_app(
     )
 
     def _get_frame_config() -> dict[str, Any]:
-        """Return the active pre-selected Frame configuration (defaults to Clean White, Fit to frame, 16:9)."""
+        """Return the active pre-selected Frame configuration (defaults to Clean White, Fit to frame, 1:1)."""
         cfg = _load_json_dict(frame_config_file)
         return {
-            "ratio": str(cfg.get("ratio", "16:9")),
+            "ratio": str(cfg.get("ratio", "1:1")),
             "fit_mode": str(cfg.get("fit_mode", "fit")),
             "template_style": str(cfg.get("template_style", "clean_white")),
             "offset_x": float(cfg.get("offset_x", 0.5)),
@@ -277,6 +277,8 @@ def create_review_app(
         covered_bgr: np.ndarray,
         car_id: str | None = None,
         ratio_override: str | None = None,
+        fit_mode_override: str | None = None,
+        template_style_override: str | None = None,
     ) -> Image.Image:
         """Render a plate-covered BGR photo using the pre-selected Frame configuration across any ratio."""
         fcfg = _get_frame_config()
@@ -284,6 +286,8 @@ def create_review_app(
         car_meta = all_meta.get(car_id or "", {}) if car_id else {}
 
         target_ratio = ratio_override or fcfg["ratio"]
+        target_fit_mode = fit_mode_override or fcfg["fit_mode"]
+        target_template_style = template_style_override or fcfg["template_style"]
         model_str = car_meta.get("car_model") if "car_model" in car_meta else fcfg["car_model"]
         # If the car was uploaded with an empty price, keep it empty so no price is rendered in the frame
         price_str = car_meta.get("car_price", "") if car_meta else fcfg["car_price"]
@@ -292,8 +296,8 @@ def create_review_app(
         return render_apple_frame_studio(
             image_bgr=covered_bgr,
             ratio=target_ratio,
-            fit_mode=fcfg["fit_mode"],
-            template_style=fcfg["template_style"],
+            fit_mode=target_fit_mode,
+            template_style=target_template_style,
             offset_x=fcfg["offset_x"],
             offset_y=fcfg["offset_y"],
             caption_enabled=fcfg["caption_enabled"],
@@ -848,6 +852,8 @@ def create_review_app(
     def api_export_zip(
         car_id: str,
         ratio: str | None = Query(default=None),
+        fit_mode: str | None = Query(default=None),
+        template_style: str | None = Query(default=None),
         _user: str = Depends(verify_auth),
     ) -> Response:
         """Export all processed photos for a Car ID as a ZIP archive using the pre-selected Frame config."""
@@ -862,17 +868,27 @@ def create_review_app(
 
         active_fcfg = _get_frame_config()
         effective_ratio = ratio or active_fcfg["ratio"]
+        effective_fit_mode = fit_mode or active_fcfg["fit_mode"]
+        effective_template_style = template_style or active_fcfg["template_style"]
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
             for p in imgs:
                 covered_bgr = _find_plate_covered_base(safe_car, p.stem)
                 if covered_bgr is not None:
                     pil_img = _render_with_active_frame_config(
-                        covered_bgr, car_id=safe_car, ratio_override=effective_ratio
+                        covered_bgr,
+                        car_id=safe_car,
+                        ratio_override=effective_ratio,
+                        fit_mode_override=effective_fit_mode,
+                        template_style_override=effective_template_style,
                     )
                 else:
                     pil_img = _render_with_active_frame_config(
-                        load_image_bgr(p), car_id=safe_car, ratio_override=effective_ratio
+                        load_image_bgr(p),
+                        car_id=safe_car,
+                        ratio_override=effective_ratio,
+                        fit_mode_override=effective_fit_mode,
+                        template_style_override=effective_template_style,
                     )
                 img_bytes = _pil_to_jpeg_bytes(pil_img, max_width=0, quality=jpeg_quality)
                 zf.writestr(f"{p.stem}_{effective_ratio.replace(':', 'x')}.jpg", img_bytes)
@@ -1483,6 +1499,24 @@ def create_review_app(
         quad_pct = payload.get("quad_pct") if isinstance(payload.get("quad_pct"), list) else None
         in_place = bool(payload.get("in_place", False))
         remove_plate_cover = bool(payload.get("remove_plate_cover", False))
+
+        # Keep the global Frame configuration synced with the active Frames page setup
+        cur_fcfg = _get_frame_config()
+        _save_json_dict(
+            frame_config_file,
+            {
+                "ratio": ratio,
+                "fit_mode": fit_mode,
+                "template_style": template_style,
+                "offset_x": offset_x,
+                "offset_y": offset_y,
+                "caption_enabled": caption_enabled,
+                "car_model": car_model or cur_fcfg["car_model"],
+                "car_price": car_price,
+                "car_specs": car_specs or cur_fcfg["car_specs"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
         target_dir = output_dir if safe_car == "_root" else (output_dir / safe_car)
         target_dir.mkdir(parents=True, exist_ok=True)
