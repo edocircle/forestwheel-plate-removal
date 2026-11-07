@@ -422,9 +422,13 @@ tailwind.config = {
                 <span>Drag plate cover to move • Drag 4 corners to match angle</span>
               </span>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <button type="button" onclick="resetPlateQuadToAuto()" class="px-3 py-1.5 rounded-full bg-white border border-outline-variant/40 text-xs font-semibold text-on-surface-variant hover:text-on-surface">
                 Auto-Detect Reset
+              </button>
+              <button type="button" onclick="removePlateCoverAction()" class="px-3 py-1.5 rounded-full bg-amber-500/15 hover:bg-amber-500 hover:text-white text-amber-900 border border-amber-500/30 text-xs font-bold transition-all flex items-center gap-1">
+                <span class="material-symbols-outlined text-[14px]">visibility_off</span>
+                <span id="stage-remove-cover-btn-label">Remove Plate Cover</span>
               </button>
               <button type="button" onclick="togglePlateAdjustMode(false)" class="px-3.5 py-1.5 rounded-full bg-primary text-white text-xs font-semibold flex items-center gap-1">
                 <span class="material-symbols-outlined text-[14px]">visibility</span>
@@ -568,13 +572,33 @@ tailwind.config = {
           <p id="overlay-upload-feedback" class="text-[11px] text-emerald-700 font-medium hidden"></p>
         </div>
 
-        <!-- Angle / Photo Queue for Selected Car -->
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <label class="block text-xs font-bold uppercase tracking-wider text-on-surface-variant">Preview Photo</label>
+        <!-- Angle / Photo Queue for Selected Car (Supports Multi-Select for Batch Approval & Remove Plate Cover) -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <label class="block text-xs font-bold uppercase tracking-wider text-on-surface-variant">Preview Photo</label>
+              <span id="studio-selection-count-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary text-white">0 selected</span>
+            </div>
             <span id="studio-photo-status-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Approved</span>
           </div>
-          <div id="frame-photo-strip" class="grid grid-cols-4 gap-2 max-h-44 overflow-y-auto p-1">
+
+          <!-- Multi-Select Quick Controls -->
+          <div class="flex flex-wrap items-center justify-between gap-1.5 bg-surface-container-low px-2.5 py-1.5 rounded-xl border border-outline-variant/30">
+            <span class="text-[10px] font-semibold text-on-surface-variant">Check photos for batch actions:</span>
+            <div class="flex items-center gap-1">
+              <button type="button" onclick="studioSelectAllPhotos()" class="px-2 py-0.5 rounded-md bg-white hover:bg-primary hover:text-white text-[10px] font-bold text-on-surface border border-outline-variant/40 transition-colors">
+                Select All
+              </button>
+              <button type="button" onclick="studioSelectReviewPhotos()" id="btn-studio-select-review" class="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-500 hover:text-white text-[10px] font-bold text-amber-900 border border-amber-300/60 transition-colors">
+                Needs Review
+              </button>
+              <button type="button" onclick="studioClearPhotoSelection()" id="btn-studio-clear-sel" class="hidden px-2 py-0.5 rounded-md bg-surface-container hover:bg-surface-container-high text-[10px] font-semibold text-on-surface-variant transition-colors">
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <div id="frame-photo-strip" class="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1">
             <!-- Populated by JS -->
           </div>
         </div>
@@ -588,11 +612,19 @@ tailwind.config = {
             </div>
           </div>
           <div class="flex flex-col gap-2">
-            <button type="button" onclick="togglePlateAdjustMode()" id="btn-sidebar-adjust-plate"
-                    class="w-full py-2.5 px-3.5 rounded-xl border border-primary/30 bg-primary-fixed/40 hover:bg-primary hover:text-white text-primary font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
-              <span class="material-symbols-outlined text-[16px]">open_with</span>
-              <span id="lbl-sidebar-adjust-plate">Move / Adjust Plate Cover on Photo</span>
-            </button>
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" onclick="togglePlateAdjustMode()" id="btn-sidebar-adjust-plate"
+                      class="py-2.5 px-3 rounded-xl border border-primary/30 bg-primary-fixed/40 hover:bg-primary hover:text-white text-primary font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
+                <span class="material-symbols-outlined text-[16px]">open_with</span>
+                <span id="lbl-sidebar-adjust-plate">Adjust Plate Cover</span>
+              </button>
+              <button type="button" onclick="removePlateCoverAction()" id="btn-remove-plate-cover"
+                      class="py-2.5 px-3 rounded-xl border border-amber-500/40 bg-amber-50 hover:bg-amber-500 hover:text-white text-amber-900 font-semibold text-xs transition-all flex items-center justify-center gap-1.5"
+                      title="Remove plate cover from selected photo(s) (e.g. interior or side shots without plates)">
+                <span class="material-symbols-outlined text-[16px]">visibility_off</span>
+                <span id="lbl-remove-plate-cover">Remove Plate Cover</span>
+              </button>
+            </div>
             <div class="flex items-center gap-2">
               <button type="button" onclick="approveOrSaveCurrentStudioPhoto()" id="btn-studio-approve-save"
                       class="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5">
@@ -874,10 +906,12 @@ tailwind.config = {
   let panStartY = 0;
   let studioDebounceTimer = null;
 
-  // 4-Corner Plate Cover Calibration State (coordinates in 0..100% of original image)
+  // 4-Corner Plate Cover Calibration & Multi-Select State (coordinates in 0..100% of original image)
   let plateAdjustMode = false;
   let studioQuadPct = [[36, 62], [64, 62], [64, 74], [36, 74]];
   let plateQuadModified = false;
+  let studioNoOverlay = false;
+  let studioSelectedFilenames = new Set();
   let activeCornerIdx = -1;
   let isDraggingPlateBox = false;
   let plateDragStartPt = { x: 0, y: 0 };
@@ -1749,15 +1783,35 @@ tailwind.config = {
   function updateStudioReviewStatusUI() {
     const photoObj = getCurrentStudioPhotoObj();
     const isReview = photoObj && photoObj.status !== 'ready';
+    const selCount = studioSelectedFilenames.size;
+
     const badge = document.getElementById('studio-photo-status-badge');
+    const selCountBadge = document.getElementById('studio-selection-count-badge');
+    const clearBtn = document.getElementById('btn-studio-clear-sel');
     const nameEl = document.getElementById('studio-current-photo-name');
     const btnApprove = document.getElementById('btn-studio-approve-save');
     const lblApprove = document.getElementById('lbl-studio-approve-save');
     const stageLblApprove = document.getElementById('stage-approve-btn-label');
+    const lblRemoveCover = document.getElementById('lbl-remove-plate-cover');
+    const stageLblRemoveCover = document.getElementById('stage-remove-cover-btn-label');
     const btnReject = document.getElementById('btn-studio-reject');
 
+    if (selCountBadge) {
+      if (selCount > 0) {
+        selCountBadge.textContent = `${selCount} selected`;
+        selCountBadge.classList.remove('hidden');
+      } else {
+        selCountBadge.classList.add('hidden');
+      }
+    }
+    if (clearBtn) {
+      clearBtn.classList.toggle('hidden', selCount === 0);
+    }
+
     if (nameEl) {
-      if (photoObj) {
+      if (selCount > 1) {
+        nameEl.textContent = `${selCount} photos selected • Approve or remove plate cover in bulk`;
+      } else if (photoObj) {
         nameEl.textContent = isReview
           ? `${photoObj.filename} • Needs review (${photoObj.reason || 'adjust plate cover'})`
           : `${photoObj.filename} • Drag plate cover to fine-tune placement`;
@@ -1776,13 +1830,29 @@ tailwind.config = {
       }
     }
 
+    if (lblRemoveCover) {
+      lblRemoveCover.textContent = selCount > 0
+        ? `Remove Plate Cover (${selCount})`
+        : 'Remove Plate Cover';
+    }
+    if (stageLblRemoveCover) {
+      stageLblRemoveCover.textContent = selCount > 0
+        ? `Remove Plate Cover (${selCount})`
+        : 'Remove Plate Cover';
+    }
+
     if (btnApprove && lblApprove) {
-      if (isReview) {
-        btnApprove.className = 'flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5';
+      btnApprove.className = 'flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5';
+      if (selCount > 1) {
+        lblApprove.textContent = `Approve & Save Selected (${selCount})`;
+        if (stageLblApprove) stageLblApprove.textContent = `Approve Selected (${selCount})`;
+      } else if (selCount === 1) {
+        lblApprove.textContent = 'Approve & Save Selected (1)';
+        if (stageLblApprove) stageLblApprove.textContent = 'Approve & Save (1)';
+      } else if (isReview) {
         lblApprove.textContent = 'Approve & Save Photo to Gallery';
         if (stageLblApprove) stageLblApprove.textContent = 'Approve & Save';
       } else {
-        btnApprove.className = 'flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5';
         lblApprove.textContent = 'Approve & Save Plate Fix';
         if (stageLblApprove) stageLblApprove.textContent = 'Save Plate Fix';
       }
@@ -1795,6 +1865,8 @@ tailwind.config = {
 
   function openCarInFrames(carId) {
     studioCarId = carId;
+    studioSelectedFilenames.clear();
+    studioNoOverlay = false;
     const photos = getCarPhotos(carId);
     const revPhoto = photos.find(p => p.status !== 'ready');
     studioFilename = revPhoto ? revPhoto.filename : (photos.length > 0 ? photos[0].filename : null);
@@ -1809,6 +1881,8 @@ tailwind.config = {
   function openPhotoInFrames(carId, filename) {
     studioCarId = carId;
     studioFilename = filename;
+    studioSelectedFilenames.clear();
+    studioNoOverlay = false;
     const meta = getCarMeta(carId);
     document.getElementById('studio-model-input').value = meta.car_model;
     document.getElementById('studio-price-input').value = meta.car_price;
@@ -1829,6 +1903,7 @@ tailwind.config = {
     }
     if (!studioCarId || !cids.includes(studioCarId)) {
       studioCarId = cids[0];
+      studioSelectedFilenames.clear();
     }
     sel.innerHTML = cids.map(cid => {
       const meta = getCarMeta(cid);
@@ -1842,6 +1917,8 @@ tailwind.config = {
   function onFrameCarChange() {
     const sel = document.getElementById('frame-car-select');
     studioCarId = sel.value;
+    studioSelectedFilenames.clear();
+    studioNoOverlay = false;
     const photos = getCarPhotos(studioCarId);
     studioFilename = photos.length > 0 ? photos[0].filename : null;
     const meta = getCarMeta(studioCarId);
@@ -1858,28 +1935,72 @@ tailwind.config = {
     const strip = document.getElementById('frame-photo-strip');
     if (!strip || !studioCarId) return;
     const photos = getCarPhotos(studioCarId);
+    // Prune any stale selected filenames that no longer exist
+    const validNames = new Set(photos.map(p => p.filename));
+    Array.from(studioSelectedFilenames).forEach(fn => {
+      if (!validNames.has(fn)) studioSelectedFilenames.delete(fn);
+    });
+
     if (!studioFilename || !photos.some(p => p.filename === studioFilename)) {
       studioFilename = photos.length > 0 ? photos[0].filename : null;
     }
     strip.innerHTML = photos.map(p => {
       const active = p.filename === studioFilename;
+      const checked = studioSelectedFilenames.has(p.filename);
       const isRev = p.status !== 'ready';
       const thumbUrl = getMediaUrlForPhoto(studioCarId, p, 'after');
       return `
-        <button type="button" onclick="selectStudioPhoto('${p.filename}')"
-                class="relative aspect-square rounded-xl overflow-hidden border-2 ${active ? 'border-primary ring-2 ring-primary/30' : 'border-transparent opacity-75 hover:opacity-100'} transition-all"
-                title="${p.filename}${isRev ? ' (Needs Review)' : ''}">
+        <div onclick="selectStudioPhoto('${p.filename}')"
+             class="relative aspect-square rounded-xl overflow-hidden border-2 cursor-pointer ${active ? 'border-primary ring-2 ring-primary/30' : (checked ? 'border-primary/80 bg-primary/5' : 'border-transparent opacity-80 hover:opacity-100')} transition-all group"
+             title="${p.filename}${isRev ? ' (Needs Review)' : ''}">
           <img src="${thumbUrl}" alt="${p.filename}" class="w-full h-full object-cover"/>
-          ${isRev ? `<span class="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white"></span>` : ''}
-        </button>
+          <!-- Multi-Select Checkbox -->
+          <button type="button" onclick="toggleStudioPhotoCheck('${p.filename}', event)"
+                  class="absolute top-1 left-1 w-5 h-5 rounded-md flex items-center justify-center transition-all shadow-sm ${checked ? 'bg-primary text-white border border-white' : 'bg-white/85 hover:bg-white text-transparent hover:text-primary/50 border border-outline-variant/60'}"
+                  title="Select for batch approval or plate cover removal">
+            <span class="material-symbols-outlined text-[14px] font-bold">check</span>
+          </button>
+          ${isRev ? `<span class="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white" title="Needs Review"></span>` : ''}
+        </div>
       `;
     }).join('');
     updateStudioReviewStatusUI();
   }
 
+  function toggleStudioPhotoCheck(fn, ev) {
+    if (ev) ev.stopPropagation();
+    if (studioSelectedFilenames.has(fn)) {
+      studioSelectedFilenames.delete(fn);
+    } else {
+      studioSelectedFilenames.add(fn);
+    }
+    renderFramePhotoStrip();
+  }
+
+  function studioSelectAllPhotos() {
+    if (!studioCarId) return;
+    getCarPhotos(studioCarId).forEach(p => studioSelectedFilenames.add(p.filename));
+    renderFramePhotoStrip();
+  }
+
+  function studioSelectReviewPhotos() {
+    if (!studioCarId) return;
+    studioSelectedFilenames.clear();
+    getCarPhotos(studioCarId).forEach(p => {
+      if (p.status !== 'ready') studioSelectedFilenames.add(p.filename);
+    });
+    renderFramePhotoStrip();
+  }
+
+  function studioClearPhotoSelection() {
+    studioSelectedFilenames.clear();
+    renderFramePhotoStrip();
+  }
+
   function selectStudioPhoto(fn) {
     studioFilename = fn;
     plateQuadModified = false;
+    studioNoOverlay = false;
     renderFramePhotoStrip();
     const pObj = getCurrentStudioPhotoObj();
     const isRev = Boolean(pObj && pObj.status !== 'ready');
@@ -1962,7 +2083,19 @@ tailwind.config = {
 
   function renderPlateCalibOverlay() {
     const poly = document.getElementById('plate-calib-poly');
+    const coverImg = document.getElementById('plate-calib-cover-img');
+    const centerHandle = document.getElementById('handle-plate-center');
     if (!poly || !studioQuadPct || studioQuadPct.length !== 4) return;
+
+    // Hide/show plate cover overlay elements if studioNoOverlay is toggled
+    poly.classList.toggle('hidden', studioNoOverlay);
+    if (coverImg) coverImg.classList.toggle('hidden', studioNoOverlay);
+    if (centerHandle) centerHandle.classList.toggle('hidden', studioNoOverlay);
+    for (let i = 0; i < 4; i++) {
+      const h = document.getElementById(`handle-corner-${i}`);
+      if (h) h.classList.toggle('hidden', studioNoOverlay);
+    }
+    if (studioNoOverlay) return;
 
     const ptsStr = studioQuadPct.map(pt => `${pt[0].toFixed(2)},${pt[1].toFixed(2)}`).join(' ');
     poly.setAttribute('points', ptsStr);
@@ -1981,14 +2114,12 @@ tailwind.config = {
     cx /= 4.0;
     cy /= 4.0;
 
-    const centerHandle = document.getElementById('handle-plate-center');
     if (centerHandle) {
       centerHandle.style.left = `${cx}%`;
       centerHandle.style.top = `${cy}%`;
     }
 
     // Position and tilt the live plate cover SVG image inside the quadrilateral
-    const coverImg = document.getElementById('plate-calib-cover-img');
     if (coverImg) {
       const topW = Math.hypot(studioQuadPct[1][0] - studioQuadPct[0][0], studioQuadPct[1][1] - studioQuadPct[0][1]);
       const botW = Math.hypot(studioQuadPct[2][0] - studioQuadPct[3][0], studioQuadPct[2][1] - studioQuadPct[3][1]);
@@ -2024,6 +2155,7 @@ tailwind.config = {
       ev.stopPropagation();
       if (ev.cancelable) ev.preventDefault();
     }
+    studioNoOverlay = false;
     activeCornerIdx = idx;
     isDraggingPlateBox = false;
     plateQuadModified = true;
@@ -2034,6 +2166,7 @@ tailwind.config = {
       ev.stopPropagation();
       if (ev.cancelable) ev.preventDefault();
     }
+    studioNoOverlay = false;
     activeCornerIdx = -1;
     isDraggingPlateBox = true;
     plateQuadModified = true;
@@ -2070,6 +2203,7 @@ tailwind.config = {
 
   async function resetPlateQuadToAuto() {
     plateQuadModified = false;
+    studioNoOverlay = false;
     await loadPlateQuadForCurrentPhoto(true);
     refreshStudioCanvas();
   }
@@ -2233,7 +2367,9 @@ tailwind.config = {
     });
     if (studioCarId) params.set('car_id', studioCarId);
     if (studioFilename) params.set('filename', studioFilename);
-    if (plateQuadModified && studioQuadPct && studioQuadPct.length === 4) {
+    if (studioNoOverlay) {
+      params.set('no_overlay', '1');
+    } else if (plateQuadModified && studioQuadPct && studioQuadPct.length === 4) {
       const flat = studioQuadPct.map(pt => `${pt[0].toFixed(2)},${pt[1].toFixed(2)}`).join(',');
       params.set('quad', flat);
     }
@@ -2276,37 +2412,59 @@ tailwind.config = {
     isPanning = false;
   }
 
+  function getTargetStudioFilenames() {
+    if (studioSelectedFilenames.size > 0) {
+      return Array.from(studioSelectedFilenames);
+    }
+    return studioFilename ? [studioFilename] : [];
+  }
+
   async function approveOrSaveCurrentStudioPhoto() {
-    await saveStudioFrameToGallery(true);
+    const targets = getTargetStudioFilenames();
+    await saveStudioFrameToGallery(true, studioNoOverlay, targets);
+  }
+
+  async function removePlateCoverAction() {
+    studioNoOverlay = true;
+    renderPlateCalibOverlay();
+    refreshStudioCanvas();
+    const targets = getTargetStudioFilenames();
+    await saveStudioFrameToGallery(true, true, targets);
   }
 
   async function rejectCurrentStudioPhoto() {
-    if (!studioCarId || !studioFilename) return;
+    const targets = getTargetStudioFilenames();
+    if (!studioCarId || targets.length === 0) return;
     const fb = document.getElementById('studio-save-feedback');
-    const res = await fetch(`/api/reject/${encodeURIComponent(studioCarId)}/${encodeURIComponent(studioFilename)}`, {
-      method: 'POST',
-      credentials: 'same-origin'
-    });
-    if (res.ok) {
-      if (fb) {
-        fb.textContent = `Marked ${studioFilename} as rejected.`;
-        fb.classList.remove('hidden');
-        setTimeout(() => fb.classList.add('hidden'), 3500);
-      }
-      await fetchState();
+    for (const fn of targets) {
+      await fetch(`/api/reject/${encodeURIComponent(studioCarId)}/${encodeURIComponent(fn)}`, {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
     }
+    if (fb) {
+      fb.textContent = `Marked ${targets.length} photo(s) as rejected.`;
+      fb.classList.remove('hidden');
+      setTimeout(() => fb.classList.add('hidden'), 3500);
+    }
+    studioSelectedFilenames.clear();
+    await fetchState();
   }
 
-  async function saveStudioFrameToGallery(inPlace = false) {
+  async function saveStudioFrameToGallery(inPlace = false, removePlateCover = false, targetFilenames = null) {
     const captionOn = document.getElementById('studio-caption-toggle')?.checked ?? true;
     const model = document.getElementById('studio-model-input')?.value || '';
     const price = document.getElementById('studio-price-input')?.value || '';
     const specs = document.getElementById('studio-specs-input')?.value || '';
     const fb = document.getElementById('studio-save-feedback');
+    const filenamesList = (Array.isArray(targetFilenames) && targetFilenames.length > 0)
+      ? targetFilenames
+      : (studioFilename ? [studioFilename] : ['showroom.jpg']);
 
     const bodyPayload = {
       car_id: studioCarId || 'SXX-1234-A',
-      filename: studioFilename || 'showroom.jpg',
+      filename: studioFilename || filenamesList[0],
+      filenames: filenamesList,
       ratio: studioRatio,
       fit_mode: studioFitMode,
       template_style: studioTemplate,
@@ -2317,6 +2475,7 @@ tailwind.config = {
       car_price: price,
       car_specs: specs,
       in_place: Boolean(inPlace),
+      remove_plate_cover: Boolean(removePlateCover),
       quad_pct: studioQuadPct
     };
 
@@ -2330,13 +2489,25 @@ tailwind.config = {
       const data = await res.json();
       studioFilename = data.saved_filename || studioFilename;
       plateQuadModified = false;
+      studioSelectedFilenames.clear();
       if (plateAdjustMode) {
         togglePlateAdjustMode(false);
       }
       if (fb) {
-        fb.textContent = data.approved_from_review
-          ? `Approved & saved ${data.saved_filename} to ${data.car_id} in Gallery!`
-          : `Saved ${data.saved_filename} to ${data.car_id} in Gallery!`;
+        const count = data.processed_count || filenamesList.length;
+        if (data.plate_cover_removed) {
+          fb.textContent = count > 1
+            ? `Removed plate cover & approved ${count} photos in Gallery!`
+            : `Removed plate cover & saved ${data.saved_filename} to Gallery!`;
+        } else if (data.approved_from_review) {
+          fb.textContent = count > 1
+            ? `Approved & saved ${count} selected photos to ${data.car_id} in Gallery!`
+            : `Approved & saved ${data.saved_filename} to ${data.car_id} in Gallery!`;
+        } else {
+          fb.textContent = count > 1
+            ? `Saved ${count} selected photos to ${data.car_id} in Gallery!`
+            : `Saved ${data.saved_filename} to ${data.car_id} in Gallery!`;
+        }
         fb.classList.remove('hidden');
         setTimeout(() => fb.classList.add('hidden'), 4000);
       }

@@ -456,6 +456,61 @@ def test_interactive_plate_quad_and_approve_from_frame_studio(tmp_path: Path) ->
     assert not (review_dir / "SBA8888X" / "01_rear_angle.jpg").exists()
 
 
+def test_multi_select_approve_and_remove_plate_cover_in_frame_studio(tmp_path: Path) -> None:
+    """Verify multi-selecting photos in Frame Studio to remove plate cover and approve multiple images in one batch."""
+    client, review_dir, output_dir, _ = _setup_review_fixture(tmp_path)
+    auth = ("reviewer", "s3cr3t-pass")
+
+    # Add two more review photos (e.g., interior and side profile) to SBA8888X
+    car_rev = review_dir / "SBA8888X"
+    sample_img = np.full((240, 320, 3), (85, 110, 130), dtype=np.uint8)
+    cv2.imwrite(str(car_rev / "02_interior_dash.jpg"), sample_img)
+    cv2.imwrite(str(car_rev / "03_side_profile.jpg"), sample_img)
+
+    # 1. Verify live preview with no_overlay=1 (Remove Plate Cover)
+    no_ov_resp = client.get(
+        "/api/frame-render?car_id=SBA8888X&filename=02_interior_dash.jpg&ratio=1:1&no_overlay=1",
+        auth=auth,
+    )
+    assert no_ov_resp.status_code == 200
+    assert no_ov_resp.content[:2] == b"\xff\xd8"
+
+    # 2. Multi-select all 3 photos and click "Remove Plate Cover" (which also approves & saves them to Gallery)
+    batch_resp = client.post(
+        "/api/frame-save",
+        json={
+            "car_id": "SBA8888X",
+            "filename": "01_rear_angle.jpg",
+            "filenames": [
+                "01_rear_angle.jpg",
+                "02_interior_dash.jpg",
+                "03_side_profile.jpg",
+            ],
+            "ratio": "16:9",
+            "fit_mode": "fit",
+            "template_style": "clean_white",
+            "caption": True,
+            "car_model": "Porsche 911 GT3",
+            "car_price": "",
+            "car_specs": "PDK • Singapore",
+            "in_place": True,
+            "remove_plate_cover": True,
+        },
+        auth=auth,
+    )
+    assert batch_resp.status_code == 200
+    bdata = batch_resp.json()
+    assert bdata["ok"] is True
+    assert bdata["processed_count"] == 3
+    assert bdata["approved_count"] == 3
+    assert bdata["plate_cover_removed"] is True
+
+    for fn in ("01_rear_angle.jpg", "02_interior_dash.jpg", "03_side_profile.jpg"):
+        assert (output_dir / "SBA8888X" / fn).exists()
+        assert not (review_dir / "SBA8888X" / fn).exists()
+
+
+
 
 
 
