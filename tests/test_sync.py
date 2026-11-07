@@ -248,3 +248,4 @@ def test_telegram_alert_on_rclone_error(
     url, body = sent_requests[0]
     assert "123456:TEST_BOT_TOKEN_NOT_REAL/sendMessage" in url
     assert b"oauth+token+expired" in body or b"oauth%20token%20expired" in body
+

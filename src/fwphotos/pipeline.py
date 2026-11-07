@@ -300,3 +300,4 @@ def run_pipeline(
         records.append(record)
 
     return records
+

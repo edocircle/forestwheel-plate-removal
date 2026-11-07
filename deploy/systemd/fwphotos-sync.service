@@ -22,3 +22,4 @@ ReadWritePaths=/srv/fw /opt/forestwheel-plateremoval/models
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=fwphotos-sync
+

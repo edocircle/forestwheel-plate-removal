@@ -379,3 +379,4 @@ def sync_once(
             continue
 
     return completed_records
+

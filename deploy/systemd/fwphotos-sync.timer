@@ -9,3 +9,4 @@ Unit=fwphotos-sync.service
 
 [Install]
 WantedBy=timers.target
+

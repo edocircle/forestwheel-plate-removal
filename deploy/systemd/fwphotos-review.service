@@ -25,3 +25,4 @@ SyslogIdentifier=fwphotos-review
 
 [Install]
 WantedBy=multi-user.target
+
