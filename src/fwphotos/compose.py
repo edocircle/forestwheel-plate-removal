@@ -179,6 +179,8 @@ def render_apple_frame_studio(
     car_model: str = "",
     car_price: str = "",
     car_specs: str = "",
+    logo_path: Path | None = None,
+    show_logo_watermark: bool = False,
 ) -> Image.Image:
     """Render a car photo inside the Apple-style Frame Template Editor.
 
@@ -387,6 +389,28 @@ def render_apple_frame_studio(
                         fill=(0, 88, 188, 255),
                         font=price_font,
                     )
+
+    # Optional Dealership Brand Logo Watermark in top-right corner of the photo viewport
+    if show_logo_watermark and logo_path is not None and logo_path.exists():
+        try:
+            with Image.open(logo_path) as logo_raw:
+                logo_rgba = logo_raw.convert("RGBA")
+                max_logo_w = int(canvas_w * 0.14)
+                max_logo_h = int(canvas_h * 0.08)
+                logo_rgba.thumbnail((max_logo_w, max_logo_h), Image.Resampling.LANCZOS)
+                lw, lh = logo_rgba.size
+                margin = 24
+                lx = box_x2 - lw - margin
+                ly = box_y1 + margin
+                # Subtle frosted pill behind the logo for contrast on bright/dark cars
+                draw.rounded_rectangle(
+                    [lx - 10, ly - 8, lx + lw + 10, ly + lh + 8],
+                    radius=14,
+                    fill=(255, 255, 255, 200),
+                )
+                canvas.paste(logo_rgba, (lx, ly), mask=logo_rgba)
+        except Exception:
+            pass
 
     return canvas
 

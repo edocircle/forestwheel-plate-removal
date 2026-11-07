@@ -116,17 +116,17 @@ tailwind.config = {
 <!-- Top Translucent Apple Navigation Bar -->
 <header class="sticky top-0 z-40 apple-glass border-b border-outline-variant/25">
   <div class="max-w-7xl mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-4">
-    <div class="flex items-center gap-3">
-      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-white shadow-sm">
-        <span class="material-symbols-outlined text-[20px] material-fill">directions_car</span>
+    <div onclick="switchTab('upload')" class="flex items-center gap-3 cursor-pointer">
+      <div class="w-9 h-9 rounded-xl bg-white border border-outline-variant/30 flex items-center justify-center shadow-sm overflow-hidden p-1">
+        <img id="header-brand-logo-img" src="/media/brand-logo" alt="Brand Logo" class="max-h-full max-w-full object-contain"/>
       </div>
       <div>
-        <span class="text-lg font-bold tracking-tight text-on-surface">ForestWheel</span>
-        <span class="hidden sm:inline-block ml-2 text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant">Plate Studio</span>
+        <span id="header-dealer-name" class="text-lg font-bold tracking-tight text-on-surface">Forest Wheel</span>
+        <span id="header-dealer-tagline" class="hidden sm:inline-block ml-2 text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant">Plate Studio</span>
       </div>
     </div>
 
-    <!-- Desktop Segmented 3-Tab Switcher (Upload, Gallery, Frames) -->
+    <!-- Desktop Segmented 4-Tab Switcher (Upload, Gallery, Frames, Profile) -->
     <nav class="hidden md:flex items-center bg-surface-container p-1 rounded-full border border-outline-variant/20">
       <button id="nav-desk-upload" onclick="switchTab('upload')" class="px-5 py-1.5 rounded-full text-sm font-semibold transition-all flex items-center gap-1.5 bg-white text-primary shadow-sm">
         <span class="material-symbols-outlined text-[18px]">cloud_upload</span>
@@ -141,6 +141,10 @@ tailwind.config = {
         <span class="material-symbols-outlined text-[18px]">crop_free</span>
         <span>Frames</span>
       </button>
+      <button id="nav-desk-profile" onclick="switchTab('profile')" class="px-5 py-1.5 rounded-full text-sm font-medium text-on-surface-variant hover:text-on-surface transition-all flex items-center gap-1.5">
+        <span class="material-symbols-outlined text-[18px]">account_circle</span>
+        <span>Profile</span>
+      </button>
     </nav>
 
     <!-- Right Quick Actions -->
@@ -148,6 +152,12 @@ tailwind.config = {
       <button onclick="runDemoBatch()" id="btn-demo-load" class="px-3.5 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-xs font-semibold text-on-surface-variant transition-all flex items-center gap-1.5" title="Load sample vehicles from test_photos">
         <span class="material-symbols-outlined text-[16px] text-primary">auto_awesome</span>
         <span class="hidden sm:inline">Load Sample Cars</span>
+      </button>
+      <button type="button" onclick="switchTab('profile')" id="header-user-pill"
+              class="px-3 py-1.5 rounded-full bg-white hover:bg-surface-container border border-outline-variant/30 text-xs font-semibold text-on-surface shadow-sm transition-all flex items-center gap-1.5"
+              title="Dealership Profile &amp; Security Settings">
+        <span class="w-5 h-5 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-bold text-[11px]" id="header-user-avatar">A</span>
+        <span id="header-username-label" class="hidden sm:inline">admin</span>
       </button>
     </div>
   </div>
@@ -699,6 +709,202 @@ tailwind.config = {
 </main>
 
 <!-- ========================================================================= -->
+<!-- SCREEN 4: PROFILE & DEALERSHIP SETTINGS                                   -->
+<!-- ========================================================================= -->
+<main id="screen-profile" class="hidden max-w-7xl mx-auto px-4 sm:px-8 pt-6 sm:pt-10">
+  <div class="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl sm:text-4xl font-bold tracking-tight text-on-surface">Profile &amp; Dealership Settings</h1>
+      <p class="text-sm sm:text-base text-on-surface-variant mt-1">Manage your dealership brand logo, watermark defaults, and account credentials.</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
+    <!-- Left Column: Brand Logo + Dealership Identity -->
+    <div class="lg:col-span-7 space-y-6">
+      <!-- Card 1: Dealership Brand Logo & Watermark -->
+      <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+              <span class="material-symbols-outlined text-[20px]">verified</span>
+            </div>
+            <div>
+              <h2 class="text-base font-bold text-on-surface">Dealership Brand Logo</h2>
+              <p class="text-xs text-on-surface-variant">Displayed in the top navigation bar and optional frame watermark badge.</p>
+            </div>
+          </div>
+          <span id="profile-logo-custom-badge" class="hidden text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">Custom Logo Active</span>
+        </div>
+
+        <input id="profile-logo-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/*" class="hidden" onchange="uploadBrandLogo(this.files)"/>
+
+        <div class="flex flex-col sm:flex-row items-center gap-5 p-4 rounded-2xl bg-surface border border-outline-variant/30">
+          <!-- Checkered Preview Box -->
+          <div class="w-32 h-24 rounded-xl bg-white border border-outline-variant/40 flex items-center justify-center p-3 shadow-inner shrink-0">
+            <img id="profile-logo-preview-img" src="/media/brand-logo" alt="Dealership Logo Preview" class="max-h-full max-w-full object-contain"/>
+          </div>
+          <div class="flex-1 space-y-3 text-center sm:text-left">
+            <p class="text-xs text-on-surface-variant">Recommended: Transparent PNG or WebP (at least 300×120 px). Automatically scaled for header &amp; frame watermark.</p>
+            <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
+              <button type="button" onclick="document.getElementById('profile-logo-file-input').click()"
+                      class="px-4 py-2 rounded-xl bg-primary hover:bg-primary-container text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-[16px]">upload</span>
+                <span>Upload Logo</span>
+              </button>
+              <button type="button" onclick="resetBrandLogo()"
+                      class="px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant text-xs font-semibold transition-all flex items-center gap-1">
+                <span class="material-symbols-outlined text-[16px]">restart_alt</span>
+                <span>Reset to Default</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Show Watermark Toggle -->
+        <label class="flex items-center justify-between p-4 rounded-2xl bg-surface border border-outline-variant/25 cursor-pointer hover:border-primary/40 transition-all">
+          <div class="pr-4">
+            <span class="text-sm font-semibold text-on-surface block">Show Logo Badge on Framed Photos</span>
+            <span class="text-xs text-on-surface-variant">Automatically places a clean frosted dealership logo badge in the top-right corner of exported &amp; processed photos.</span>
+          </div>
+          <input id="profile-watermark-toggle" type="checkbox" onchange="saveProfileSettings()" class="w-5 h-5 rounded text-primary focus:ring-primary"/>
+        </label>
+      </div>
+
+      <!-- Card 2: Dealership Identity & Listing Defaults -->
+      <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+            <span class="material-symbols-outlined text-[20px]">storefront</span>
+          </div>
+          <div>
+            <h2 class="text-base font-bold text-on-surface">Dealership Identity &amp; Defaults</h2>
+            <p class="text-xs text-on-surface-variant">Customize your workspace title and default listing caption specs.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Dealership / Brand Name</label>
+            <input id="profile-dealer-name" type="text" placeholder="Forest Wheel"
+                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm font-semibold text-on-surface focus:outline-none focus:border-primary"/>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Header Tagline Badge</label>
+            <input id="profile-dealer-tagline" type="text" placeholder="Plate Studio"
+                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Default Subtitle / Specs Text</label>
+            <input id="profile-default-specs" type="text" placeholder="e.g. Certified Pre-Owned • Low Mileage"
+                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Currency Prefix</label>
+            <input id="profile-currency-prefix" type="text" placeholder="S$"
+                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm font-semibold text-on-surface focus:outline-none focus:border-primary"/>
+          </div>
+        </div>
+
+        <div class="pt-1 flex items-center justify-between gap-4">
+          <p id="profile-brand-feedback" class="text-xs font-semibold text-emerald-700 hidden"></p>
+          <button type="button" onclick="saveProfileSettings()"
+                  class="ml-auto px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-[17px]">save</span>
+            <span>Save Brand Settings</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Account Security + Workspace Overview -->
+    <div class="lg:col-span-5 space-y-6">
+      <!-- Card 3: Account & Password Security -->
+      <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+            <span class="material-symbols-outlined text-[20px]">lock</span>
+          </div>
+          <div>
+            <h2 class="text-base font-bold text-on-surface">Account &amp; Password</h2>
+            <p class="text-xs text-on-surface-variant">Update your administrator username and login password.</p>
+          </div>
+        </div>
+
+        <div class="space-y-3.5">
+          <div>
+            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Username</label>
+            <input id="profile-username-input" type="text" autocomplete="username"
+                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm font-semibold text-on-surface focus:outline-none focus:border-primary"/>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Current Password <span class="text-error">*</span></label>
+            <input id="profile-current-password" type="password" autocomplete="current-password" placeholder="Required to confirm changes"
+                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+          </div>
+
+          <div class="pt-1 border-t border-surface-container">
+            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">New Password <span class="text-[10px] font-normal text-outline">(leave blank to keep current)</span></label>
+            <input id="profile-new-password" type="password" autocomplete="new-password" placeholder="Minimum 6 characters"
+                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Confirm New Password</label>
+            <input id="profile-confirm-password" type="password" autocomplete="new-password" placeholder="Re-enter new password"
+                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+          </div>
+        </div>
+
+        <p id="profile-cred-feedback" class="text-xs font-semibold hidden"></p>
+
+        <button type="button" onclick="saveProfileCredentials()"
+                class="w-full py-3 rounded-xl bg-on-surface hover:opacity-90 text-white font-semibold text-xs shadow-sm transition-all flex items-center justify-center gap-1.5">
+          <span class="material-symbols-outlined text-[17px]">key</span>
+          <span>Update Credentials</span>
+        </button>
+      </div>
+
+      <!-- Card 4: Workspace Overview -->
+      <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-4">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-surface-container text-on-surface-variant flex items-center justify-center">
+            <span class="material-symbols-outlined text-[20px]">analytics</span>
+          </div>
+          <div>
+            <h2 class="text-base font-bold text-on-surface">Workspace Overview</h2>
+            <p class="text-xs text-on-surface-variant">Live inventory &amp; template summary.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
+            <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Car Groups</span>
+            <span id="stat-total-cars" class="text-2xl font-bold text-on-surface mt-0.5 block">0</span>
+          </div>
+          <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
+            <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Ready Photos</span>
+            <span id="stat-ready-photos" class="text-2xl font-bold text-emerald-600 mt-0.5 block">0</span>
+          </div>
+          <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
+            <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Needs Review</span>
+            <span id="stat-review-photos" class="text-2xl font-bold text-amber-600 mt-0.5 block">0</span>
+          </div>
+          <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
+            <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Active Frame</span>
+            <span id="stat-active-preset" class="text-sm font-bold text-primary mt-1.5 block truncate">1:1 • Fit</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ========================================================================= -->
 <!-- CAR GROUP EXPANDED MODAL (ALL PHOTOS + BEFORE/AFTER TOGGLE + EDIT/DELETE) -->
 <!-- ========================================================================= -->
 <div id="car-detail-modal" class="fixed inset-0 z-50 hidden bg-black/35 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
@@ -859,7 +1065,7 @@ tailwind.config = {
 </div>
 
 <!-- ========================================================================= -->
-<!-- MOBILE BOTTOM TAB BAR (3 TABS: UPLOAD, GALLERY, FRAMES)                   -->
+<!-- MOBILE BOTTOM TAB BAR (4 TABS: UPLOAD, GALLERY, FRAMES, PROFILE)          -->
 <!-- ========================================================================= -->
 <nav class="md:hidden fixed bottom-0 left-0 right-0 z-40 apple-glass border-t border-outline-variant/30 px-6 py-2 flex items-center justify-around">
   <button type="button" onclick="switchTab('upload')" id="nav-mob-upload" class="flex flex-col items-center gap-0.5 py-1 text-primary font-semibold">
@@ -873,6 +1079,10 @@ tailwind.config = {
   <button type="button" onclick="switchTab('frames')" id="nav-mob-frames" class="flex flex-col items-center gap-0.5 py-1 text-on-surface-variant font-medium">
     <span class="material-symbols-outlined text-[24px]">crop_free</span>
     <span class="text-[11px]">Frames</span>
+  </button>
+  <button type="button" onclick="switchTab('profile')" id="nav-mob-profile" class="flex flex-col items-center gap-0.5 py-1 text-on-surface-variant font-medium">
+    <span class="material-symbols-outlined text-[24px]">account_circle</span>
+    <span class="text-[11px]">Profile</span>
   </button>
 </nav>
 
@@ -924,10 +1134,10 @@ tailwind.config = {
 
   const SAMPLE_PLATES = ['SXX 1234 A', 'SBA 8888 X', 'SGP 9110 T', 'SLR 4580 M', 'SKL 2026 Z'];
 
-  // Switch between the 3 primary tabs: Upload, Gallery, Frames
+  // Switch between the 4 primary tabs: Upload, Gallery, Frames, Profile
   function switchTab(tab) {
     activeTab = tab;
-    ['upload', 'gallery', 'frames'].forEach(t => {
+    ['upload', 'gallery', 'frames', 'profile'].forEach(t => {
       const sec = document.getElementById('screen-' + t);
       if (sec) sec.classList.toggle('hidden', t !== tab);
 
@@ -959,6 +1169,10 @@ tailwind.config = {
       populateFrameStudioSelectors();
       refreshStudioCanvas();
     }
+
+    if (tab === 'profile') {
+      populateProfilePage();
+    }
   }
 
   // Fetch backend state
@@ -970,9 +1184,15 @@ tailwind.config = {
       if (appState.frame_config) {
         syncUiWithFrameConfig(appState.frame_config);
       }
+      if (appState.profile) {
+        syncUiWithProfile(appState.profile);
+      }
       updateGalleryCountBadge();
       renderGallery();
       populateFrameStudioSelectors();
+      if (activeTab === 'profile') {
+        populateProfilePage();
+      }
     } catch (err) {
       console.error('Error loading state:', err);
     }
@@ -2541,6 +2761,200 @@ tailwind.config = {
 
   function exportStudioFrame() {
     window.location.href = buildStudioRenderUrl(1);
+  }
+
+  // =========================================================================
+  // SCREEN 4: PROFILE & DEALERSHIP SETTINGS LOGIC
+  // =========================================================================
+  function syncUiWithProfile(prof) {
+    if (!prof) return;
+    const dealerNameEl = document.getElementById('header-dealer-name');
+    if (dealerNameEl) dealerNameEl.textContent = prof.dealer_name || 'Forest Wheel';
+
+    const taglineEl = document.getElementById('header-dealer-tagline');
+    if (taglineEl) taglineEl.textContent = prof.dealer_tagline || 'Plate Studio';
+
+    const userLabelEl = document.getElementById('header-username-label');
+    if (userLabelEl) userLabelEl.textContent = prof.username || 'admin';
+
+    const avatarEl = document.getElementById('header-user-avatar');
+    if (avatarEl) avatarEl.textContent = ((prof.username || 'A')[0] || 'A').toUpperCase();
+
+    const customBadge = document.getElementById('profile-logo-custom-badge');
+    if (customBadge) customBadge.classList.toggle('hidden', !prof.has_custom_logo);
+
+    // Pre-fill default specs in Upload page if empty
+    const uploadSpecsInput = document.getElementById('batch-specs-input');
+    if (uploadSpecsInput && !uploadSpecsInput.value && prof.default_specs) {
+      uploadSpecsInput.value = prof.default_specs;
+    }
+  }
+
+  function populateProfilePage() {
+    const prof = (appState && appState.profile) ? appState.profile : {};
+    const nameInput = document.getElementById('profile-dealer-name');
+    if (nameInput) nameInput.value = prof.dealer_name || 'Forest Wheel';
+
+    const tagInput = document.getElementById('profile-dealer-tagline');
+    if (tagInput) tagInput.value = prof.dealer_tagline || 'Plate Studio';
+
+    const specsInput = document.getElementById('profile-default-specs');
+    if (specsInput) specsInput.value = prof.default_specs || '';
+
+    const currInput = document.getElementById('profile-currency-prefix');
+    if (currInput) currInput.value = prof.currency_prefix || 'S$';
+
+    const wmToggle = document.getElementById('profile-watermark-toggle');
+    if (wmToggle) wmToggle.checked = Boolean(prof.show_logo_watermark);
+
+    const userInput = document.getElementById('profile-username-input');
+    if (userInput) userInput.value = prof.username || 'admin';
+
+    // Update Workspace Overview Stats
+    const outCars = appState.cars_output || {};
+    const revCars = appState.cars_review || {};
+    const allCarIds = new Set([...Object.keys(outCars), ...Object.keys(revCars)]);
+    let readyCount = 0;
+    let reviewCount = 0;
+    Object.values(outCars).forEach(arr => { readyCount += (arr ? arr.length : 0); });
+    Object.values(revCars).forEach(arr => { reviewCount += (arr ? arr.length : 0); });
+
+    const elCars = document.getElementById('stat-total-cars');
+    if (elCars) elCars.textContent = String(allCarIds.size);
+    const elReady = document.getElementById('stat-ready-photos');
+    if (elReady) elReady.textContent = String(readyCount);
+    const elRev = document.getElementById('stat-review-photos');
+    if (elRev) elRev.textContent = String(reviewCount);
+    const elPreset = document.getElementById('stat-active-preset');
+    if (elPreset) {
+      const fcfg = appState.frame_config || {};
+      const r = fcfg.ratio || studioRatio || '1:1';
+      const fm = (fcfg.fit_mode || studioFitMode) === 'fill' ? 'Fill' : 'Fit';
+      elPreset.textContent = `${r} • ${fm}`;
+    }
+  }
+
+  function refreshBrandLogoImages() {
+    const bust = '/media/brand-logo?t=' + Date.now();
+    const headerImg = document.getElementById('header-brand-logo-img');
+    if (headerImg) headerImg.src = bust;
+    const prevImg = document.getElementById('profile-logo-preview-img');
+    if (prevImg) prevImg.src = bust;
+  }
+
+  async function uploadBrandLogo(files) {
+    if (!files || !files.length) return;
+    const fd = new FormData();
+    fd.append('file', files[0]);
+    try {
+      const res = await fetch('/api/profile/logo', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: fd
+      });
+      if (res.ok) {
+        refreshBrandLogoImages();
+        await fetchState();
+        showProfileFeedback('profile-brand-feedback', 'Dealership logo uploaded!', false);
+      } else {
+        showProfileFeedback('profile-brand-feedback', 'Failed to upload logo image.', true);
+      }
+    } catch (err) {
+      console.error('Upload brand logo error:', err);
+    }
+  }
+
+  async function resetBrandLogo() {
+    try {
+      const res = await fetch('/api/profile/logo', {
+        method: 'DELETE',
+        credentials: 'same-origin'
+      });
+      if (res.ok) {
+        refreshBrandLogoImages();
+        await fetchState();
+        showProfileFeedback('profile-brand-feedback', 'Reset to default Forest Wheel logo.', false);
+      }
+    } catch (err) {
+      console.error('Reset brand logo error:', err);
+    }
+  }
+
+  async function saveProfileSettings() {
+    const payload = {
+      dealer_name: (document.getElementById('profile-dealer-name')?.value || 'Forest Wheel').trim(),
+      dealer_tagline: (document.getElementById('profile-dealer-tagline')?.value || 'Plate Studio').trim(),
+      default_specs: (document.getElementById('profile-default-specs')?.value || '').trim(),
+      currency_prefix: (document.getElementById('profile-currency-prefix')?.value || 'S$').trim(),
+      show_logo_watermark: Boolean(document.getElementById('profile-watermark-toggle')?.checked)
+    };
+    try {
+      const res = await fetch('/api/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        appState.profile = data.profile;
+        syncUiWithProfile(data.profile);
+        showProfileFeedback('profile-brand-feedback', 'Brand settings saved!', false);
+      } else {
+        showProfileFeedback('profile-brand-feedback', 'Could not save brand settings.', true);
+      }
+    } catch (err) {
+      console.error('Save profile error:', err);
+    }
+  }
+
+  async function saveProfileCredentials() {
+    const newUsername = (document.getElementById('profile-username-input')?.value || '').trim();
+    const currentPassword = document.getElementById('profile-current-password')?.value || '';
+    const newPassword = document.getElementById('profile-new-password')?.value || '';
+    const confirmPassword = document.getElementById('profile-confirm-password')?.value || '';
+
+    if (!currentPassword) {
+      showProfileFeedback('profile-cred-feedback', 'Please enter your current password.', true);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/profile/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_username: newUsername,
+          new_password: newPassword,
+          confirm_password: confirmPassword
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        document.getElementById('profile-current-password').value = '';
+        document.getElementById('profile-new-password').value = '';
+        document.getElementById('profile-confirm-password').value = '';
+        showProfileFeedback('profile-cred-feedback', 'Credentials updated! Browser may prompt you to sign in with your new credentials.', false);
+        await fetchState();
+      } else {
+        showProfileFeedback('profile-cred-feedback', data.detail || 'Failed to update credentials.', true);
+      }
+    } catch (err) {
+      showProfileFeedback('profile-cred-feedback', 'Error updating credentials.', true);
+    }
+  }
+
+  function showProfileFeedback(elId, msg, isError) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = msg;
+    el.className = isError
+      ? 'text-xs font-semibold text-error'
+      : 'text-xs font-semibold text-emerald-700';
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 4500);
   }
 
   // Initialize on page load

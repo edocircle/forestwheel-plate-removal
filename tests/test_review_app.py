@@ -547,6 +547,93 @@ def test_gallery_export_zip_follows_frames_page_config(tmp_path: Path) -> None:
             assert exported_img.size[0] == exported_img.size[1]
 
 
+def test_user_profile_brand_logo_and_credentials_update(tmp_path: Path) -> None:
+    """Verify editing dealership profile, uploading custom brand logo, rendering logo watermark, and changing login username/password."""
+    client, _, _, _ = _setup_review_fixture(tmp_path)
+    old_auth = ("reviewer", "s3cr3t-pass")
+
+    # 1. Update dealership identity & enable logo watermark
+    prof_resp = client.put(
+        "/api/profile",
+        json={
+            "dealer_name": "Apex Motors SG",
+            "dealer_tagline": "Luxury Showroom",
+            "default_specs": "Agent Unit • Full Servicing",
+            "currency_prefix": "SGD ",
+            "show_logo_watermark": True,
+        },
+        auth=old_auth,
+    )
+    assert prof_resp.status_code == 200
+    prof_data = prof_resp.json()["profile"]
+    assert prof_data["dealer_name"] == "Apex Motors SG"
+    assert prof_data["show_logo_watermark"] is True
+
+    # 2. Upload custom brand logo
+    logo_img = np.full((90, 220, 4), (30, 140, 250, 255), dtype=np.uint8)
+    _, logo_buf = cv2.imencode(".png", logo_img)
+    logo_up = client.post(
+        "/api/profile/logo",
+        files=[("file", ("apex_logo.png", logo_buf.tobytes(), "image/png"))],
+        auth=old_auth,
+    )
+    assert logo_up.status_code == 200
+    assert logo_up.json()["has_custom_logo"] is True
+
+    # Serve active brand logo
+    get_logo = client.get("/media/brand-logo", auth=old_auth)
+    assert get_logo.status_code == 200
+    assert get_logo.headers["content-type"] == "image/png"
+
+    # Verify Frame Studio render succeeds with watermark enabled
+    render_resp = client.get(
+        "/api/frame-render?car_id=SBA8888X&filename=01_rear_angle.jpg&ratio=1:1",
+        auth=old_auth,
+    )
+    assert render_resp.status_code == 200
+    assert render_resp.content[:2] == b"\xff\xd8"
+
+    # 3. Change username and password (wrong current_password must fail with 400)
+    bad_cred = client.post(
+        "/api/profile/credentials",
+        json={
+            "current_password": "wrong-password",
+            "new_username": "apex_admin",
+            "new_password": "new-strong-password",
+            "confirm_password": "new-strong-password",
+        },
+        auth=old_auth,
+    )
+    assert bad_cred.status_code == 400
+
+    # Valid credential update
+    good_cred = client.post(
+        "/api/profile/credentials",
+        json={
+            "current_password": "s3cr3t-pass",
+            "new_username": "apex_admin",
+            "new_password": "new-strong-password",
+            "confirm_password": "new-strong-password",
+        },
+        auth=old_auth,
+    )
+    assert good_cred.status_code == 200
+    assert good_cred.json()["username"] == "apex_admin"
+
+    # Old credentials must now be rejected (401) and new credentials accepted (200)
+    assert client.get("/api/profile", auth=old_auth).status_code == 401
+    new_auth = ("apex_admin", "new-strong-password")
+    new_prof_resp = client.get("/api/profile", auth=new_auth)
+    assert new_prof_resp.status_code == 200
+    assert new_prof_resp.json()["profile"]["username"] == "apex_admin"
+
+    # Reset custom brand logo back to default
+    del_logo = client.delete("/api/profile/logo", auth=new_auth)
+    assert del_logo.status_code == 200
+    assert del_logo.json()["has_custom_logo"] is False
+
+
+
 
 
 

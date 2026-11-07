@@ -12,6 +12,7 @@ Supports:
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -242,6 +243,9 @@ def create_review_app(
     cars_meta_file = state_file.parent / "cars_metadata.json"
     frame_config_file = state_file.parent / "frame_config.json"
     custom_overlay_file = state_file.parent / "custom_plate_overlay.png"
+    user_profile_file = state_file.parent / "user_profile.json"
+    custom_logo_file = state_file.parent / "custom_brand_logo.png"
+    default_logo_path = Path("assets/logo.png")
     car_state_file_cfg = sync_cfg.get("car_state_file")
     car_state_dir = Path(car_state_file_cfg).parent if car_state_file_cfg else state_file.parent
 
@@ -257,9 +261,47 @@ def create_review_app(
         else (load_overlay_rgba(overlay_path) if overlay_path.exists() else None)
     )
 
+    user_env_key = str(app_cfg.get("auth_user_env", "FW_REVIEW_USER"))
+    pass_env_key = str(app_cfg.get("auth_pass_env", "FW_REVIEW_PASS"))
+
+    def _hash_password(password: str, salt_hex: str) -> str:
+        """Compute PBKDF2-HMAC-SHA256 hex digest for user password storage."""
+        return hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            100_000,
+        ).hex()
+
+    def _get_active_logo_path() -> Path | None:
+        """Return custom uploaded brand logo path, falling back to default assets/logo.png."""
+        if custom_logo_file.exists():
+            return custom_logo_file
+        if default_logo_path.exists():
+            return default_logo_path
+        return None
+
+    def _get_user_profile() -> dict[str, Any]:
+        """Return public-safe Dealership & User Profile settings."""
+        environ = os.environ if env is None else env
+        default_user = environ.get(user_env_key, "admin") or "admin"
+        raw = _load_json_dict(user_profile_file)
+        return {
+            "username": str(raw.get("username") or default_user),
+            "dealer_name": str(raw.get("dealer_name", "Forest Wheel")),
+            "dealer_tagline": str(raw.get("dealer_tagline", "Plate Removal Studio")),
+            "default_specs": str(raw.get("default_specs", "Verified Pre-Owned • Singapore")),
+            "currency_prefix": str(raw.get("currency_prefix", "S$")),
+            "show_logo_watermark": bool(raw.get("show_logo_watermark", False)),
+            "has_custom_logo": custom_logo_file.exists(),
+            "has_custom_credentials": bool(raw.get("password_hash") and raw.get("password_salt")),
+            "updated_at": str(raw.get("updated_at", "")),
+        }
+
     def _get_frame_config() -> dict[str, Any]:
         """Return the active pre-selected Frame configuration (defaults to Clean White, Fit to frame, 1:1)."""
         cfg = _load_json_dict(frame_config_file)
+        prof = _get_user_profile()
         return {
             "ratio": str(cfg.get("ratio", "1:1")),
             "fit_mode": str(cfg.get("fit_mode", "fit")),
@@ -267,9 +309,9 @@ def create_review_app(
             "offset_x": float(cfg.get("offset_x", 0.5)),
             "offset_y": float(cfg.get("offset_y", 0.5)),
             "caption_enabled": bool(cfg.get("caption_enabled", True)),
-            "car_model": str(cfg.get("car_model", "Forest Wheel Showroom")),
+            "car_model": str(cfg.get("car_model", f"{prof['dealer_name']} Showroom")),
             "car_price": str(cfg.get("car_price", "")),
-            "car_specs": str(cfg.get("car_specs", "Verified Quality Pre-Owned • Singapore")),
+            "car_specs": str(cfg.get("car_specs", prof["default_specs"])),
             "has_custom_overlay": custom_overlay_file.exists(),
         }
 
@@ -282,6 +324,7 @@ def create_review_app(
     ) -> Image.Image:
         """Render a plate-covered BGR photo using the pre-selected Frame configuration across any ratio."""
         fcfg = _get_frame_config()
+        prof = _get_user_profile()
         all_meta = _load_json_dict(cars_meta_file)
         car_meta = all_meta.get(car_id or "", {}) if car_id else {}
 
@@ -304,6 +347,8 @@ def create_review_app(
             car_model=str(model_str or ""),
             car_price=str(price_str or ""),
             car_specs=str(specs_str or ""),
+            logo_path=_get_active_logo_path(),
+            show_logo_watermark=prof["show_logo_watermark"],
         )
 
     supported_exts = list(
@@ -313,9 +358,6 @@ def create_review_app(
     low_conf_floor = float(app_cfg.get("low_conf_preview_floor", 0.05))
     jpeg_quality = int(settings.get("output", {}).get("jpeg_quality", 92))
 
-    user_env_key = str(app_cfg.get("auth_user_env", "FW_REVIEW_USER"))
-    pass_env_key = str(app_cfg.get("auth_pass_env", "FW_REVIEW_PASS"))
-
     detector_instance = detector
 
     def _get_detector() -> PlateDetector:
@@ -324,6 +366,22 @@ def create_review_app(
             detector_instance = PlateDetector.from_config(settings)
         return detector_instance
 
+    def _verify_password_for_current_user(candidate_password: str) -> bool:
+        """Verify candidate_password against saved PBKDF2 hash or fallback environment variable."""
+        raw_prof = _load_json_dict(user_profile_file)
+        saved_hash = str(raw_prof.get("password_hash", ""))
+        saved_salt = str(raw_prof.get("password_salt", ""))
+        if saved_hash and saved_salt:
+            cand_hash = _hash_password(candidate_password, saved_salt)
+            return secrets.compare_digest(cand_hash.encode("utf-8"), saved_hash.encode("utf-8"))
+        environ = os.environ if env is None else env
+        expected_pass = environ.get(pass_env_key, "")
+        if not expected_pass:
+            return False
+        return secrets.compare_digest(
+            candidate_password.encode("utf-8"), expected_pass.encode("utf-8")
+        )
+
     def verify_auth(
         credentials: HTTPBasicCredentials | None = Depends(security),
     ) -> str:
@@ -331,8 +389,10 @@ def create_review_app(
         environ = os.environ if env is None else env
         expected_user = environ.get(user_env_key, "")
         expected_pass = environ.get(pass_env_key, "")
+        raw_prof = _load_json_dict(user_profile_file)
+        has_saved_creds = bool(raw_prof.get("password_hash") and raw_prof.get("password_salt"))
 
-        if not expected_user or not expected_pass:
+        if not has_saved_creds and (not expected_user or not expected_pass):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Review authentication credentials are not configured.",
@@ -345,12 +405,11 @@ def create_review_app(
                 headers={"WWW-Authenticate": 'Basic realm="Forest Wheel Review"'},
             )
 
+        active_username = str(raw_prof.get("username") or expected_user)
         user_ok = secrets.compare_digest(
-            credentials.username.encode("utf-8"), expected_user.encode("utf-8")
+            credentials.username.encode("utf-8"), active_username.encode("utf-8")
         )
-        pass_ok = secrets.compare_digest(
-            credentials.password.encode("utf-8"), expected_pass.encode("utf-8")
-        )
+        pass_ok = _verify_password_for_current_user(credentials.password)
         if not (user_ok and pass_ok):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -463,13 +522,155 @@ def create_review_app(
 
     @app.get("/api/state")
     def api_state(_user: str = Depends(verify_auth)) -> JSONResponse:
-        """Return complete state of both output/ and review/ car galleries, metadata, and Frame configuration."""
+        """Return complete state of both output/ and review/ car galleries, metadata, Frame config, and Profile."""
         return JSONResponse(
             content={
                 "cars_output": _discover_folder_tree(output_dir, is_review=False),
                 "cars_review": _discover_folder_tree(review_dir, is_review=True),
                 "cars_meta": _load_json_dict(cars_meta_file),
                 "frame_config": _get_frame_config(),
+                "profile": _get_user_profile(),
+            }
+        )
+
+    @app.get("/api/profile")
+    def api_get_profile(_user: str = Depends(verify_auth)) -> JSONResponse:
+        """Return the active Dealership & User Profile settings."""
+        return JSONResponse(content={"ok": True, "profile": _get_user_profile()})
+
+    @app.put("/api/profile")
+    def api_update_profile(
+        payload: dict[str, Any] = Body(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Update Dealership Brand Name, Tagline, Default Specs, Currency Prefix, and Logo Watermark toggle."""
+        raw = _load_json_dict(user_profile_file)
+        cur = _get_user_profile()
+
+        raw["dealer_name"] = str(payload.get("dealer_name", cur["dealer_name"])).strip() or "Forest Wheel"
+        raw["dealer_tagline"] = str(payload.get("dealer_tagline", cur["dealer_tagline"])).strip()
+        raw["default_specs"] = str(payload.get("default_specs", cur["default_specs"])).strip()
+        raw["currency_prefix"] = str(payload.get("currency_prefix", cur["currency_prefix"])).strip()
+        raw["show_logo_watermark"] = bool(payload.get("show_logo_watermark", cur["show_logo_watermark"]))
+        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _save_json_dict(user_profile_file, raw)
+
+        return JSONResponse(content={"ok": True, "profile": _get_user_profile()})
+
+    @app.post("/api/profile/logo")
+    async def api_upload_brand_logo(
+        file: UploadFile = File(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Upload a custom dealership brand logo for the web app header and optional photo frame watermark."""
+        raw_bytes = await file.read()
+        if not raw_bytes:
+            raise HTTPException(status_code=400, detail="Empty logo file.")
+
+        try:
+            with Image.open(io.BytesIO(raw_bytes)) as pil_logo:
+                rgba = pil_logo.convert("RGBA")
+                custom_logo_file.parent.mkdir(parents=True, exist_ok=True)
+                rgba.save(custom_logo_file, format="PNG")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=400, detail=f"Invalid image file for brand logo: {exc}"
+            ) from exc
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "has_custom_logo": True,
+                "filename": file.filename or "custom_brand_logo.png",
+                "profile": _get_user_profile(),
+            }
+        )
+
+    @app.delete("/api/profile/logo")
+    def api_reset_brand_logo(_user: str = Depends(verify_auth)) -> JSONResponse:
+        """Reset the dealership brand logo back to the default assets/logo.png."""
+        if custom_logo_file.exists():
+            custom_logo_file.unlink(missing_ok=True)
+        return JSONResponse(
+            content={
+                "ok": True,
+                "has_custom_logo": False,
+                "profile": _get_user_profile(),
+            }
+        )
+
+    @app.get("/media/brand-logo")
+    def media_brand_logo(_user: str = Depends(verify_auth)) -> Response:
+        """Serve the currently active Dealership Brand Logo (custom upload or default assets/logo.png)."""
+        target = _get_active_logo_path()
+        if target is None or not target.exists():
+            fallback_pil = Image.new("RGBA", (180, 60), (0, 88, 188, 255))
+            buf = io.BytesIO()
+            fallback_pil.save(buf, format="PNG")
+            return Response(
+                content=buf.getvalue(),
+                media_type="image/png",
+                headers={"Cache-Control": "private, no-store"},
+            )
+        return Response(
+            content=target.read_bytes(),
+            media_type="image/png",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.post("/api/profile/credentials")
+    def api_update_credentials(
+        payload: dict[str, Any] = Body(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Verify current password and update login username and/or PBKDF2-HMAC-SHA256 hashed password."""
+        current_password = str(payload.get("current_password") or "")
+        new_username = str(payload.get("new_username") or "").strip()
+        new_password = str(payload.get("new_password") or "")
+        confirm_password = str(payload.get("confirm_password") or "")
+
+        if not current_password or not _verify_password_for_current_user(current_password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect.",
+            )
+
+        if not new_username:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username cannot be empty.",
+            )
+
+        if new_password:
+            if len(new_password) < 4:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="New password must be at least 4 characters.",
+                )
+            if new_password != confirm_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="New password and confirmation do not match.",
+                )
+            effective_password = new_password
+        else:
+            effective_password = current_password
+
+        salt_hex = secrets.token_hex(16)
+        pw_hash = _hash_password(effective_password, salt_hex)
+
+        raw = _load_json_dict(user_profile_file)
+        raw["username"] = new_username
+        raw["password_salt"] = salt_hex
+        raw["password_hash"] = pw_hash
+        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _save_json_dict(user_profile_file, raw)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "username": new_username,
+                "profile": _get_user_profile(),
             }
         )
 
@@ -1443,6 +1644,7 @@ def create_review_app(
             except ValueError:
                 parsed_quad = None
 
+        prof = _get_user_profile()
         bgr = _resolve_covered_bgr_for_frame(
             car_id,
             filename,
@@ -1460,6 +1662,8 @@ def create_review_app(
             car_model=car_model,
             car_price=car_price,
             car_specs=car_specs,
+            logo_path=_get_active_logo_path(),
+            show_logo_watermark=prof["show_logo_watermark"],
         )
         max_w = 0 if download else 1080
         jpeg_bytes = _pil_to_jpeg_bytes(rendered_pil, max_width=max_w, quality=jpeg_quality)
@@ -1528,6 +1732,7 @@ def create_review_app(
         decisions = _load_json_dict(decisions_file)
         decisions_changed = False
 
+        prof = _get_user_profile()
         for fname in target_filenames:
             safe_fname = _validate_path_segment(fname)
             # Only apply custom 4-corner quad to the active photo when saving a single photo (or when not removing plate cover)
@@ -1550,6 +1755,8 @@ def create_review_app(
                 car_model=car_model,
                 car_price=car_price,
                 car_specs=car_specs,
+                logo_path=_get_active_logo_path(),
+                show_logo_watermark=prof["show_logo_watermark"],
             )
 
             stem = Path(safe_fname).stem
