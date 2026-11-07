@@ -617,9 +617,11 @@ tailwind.config = {
       </div>
     </div>
 
-    <!-- All Photos Grid inside Modal -->
-    <div id="modal-photos-grid" class="p-6 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 flex-1">
-      <!-- Populated by JS -->
+    <!-- All Photos Scrollable Container inside Modal -->
+    <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-7">
+      <div id="modal-photos-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
+        <!-- Populated by JS -->
+      </div>
     </div>
   </div>
 </div>
@@ -1215,7 +1217,7 @@ tailwind.config = {
 
         return `
           <div onclick="onGalleryThumbClick('${cid}', '${p.filename}', event)"
-               class="relative aspect-[4/3] rounded-2xl overflow-hidden bg-surface-container border ${isSelected ? 'border-primary ring-2 ring-primary' : 'border-outline-variant/25'} cursor-pointer group">
+               class="relative aspect-square rounded-2xl overflow-hidden bg-surface-container border ${isSelected ? 'border-primary ring-2 ring-primary' : 'border-outline-variant/25'} cursor-pointer group">
             <img src="${imgUrl}" alt="${p.filename}" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/>
             <div class="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${mode === 'before' ? 'bg-amber-500/90 text-white' : 'bg-black/55 text-white'}">
               ${mode === 'before' ? 'Original' : 'Plate Removed'}
@@ -1417,10 +1419,10 @@ tailwind.config = {
       const imgUrl = getMediaUrlForPhoto(activeModalCarId, p, modalCompareMode);
       const isReview = p.status !== 'ready';
       return `
-        <div class="apple-card-white rounded-2xl overflow-hidden flex flex-col justify-between border border-outline-variant/30">
+        <div class="apple-card-white rounded-2xl overflow-hidden flex flex-col justify-between border border-outline-variant/30 shrink-0">
           <div onclick="openPhotoFullWindow('${activeModalCarId}', '${p.filename}', '${p.status}', '${modalCompareMode}', event)"
-               class="relative aspect-[4/3] bg-surface-container cursor-zoom-in group" title="Click to open full image in new window">
-            <img src="${imgUrl}" alt="${p.filename}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/>
+               class="relative w-full aspect-square bg-surface-container cursor-zoom-in group overflow-hidden" title="Click to open full image in new window">
+            <img src="${imgUrl}" alt="${p.filename}" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/>
             <span class="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${modalCompareMode === 'before' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}">
               ${modalCompareMode === 'before' ? 'Original' : 'Plate Removed'}
             </span>
