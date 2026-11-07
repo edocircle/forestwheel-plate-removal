@@ -410,6 +410,53 @@ def test_upload_empty_listing_price_hides_price_and_preserves_specs(tmp_path: Pa
     assert car_meta["car_specs"] == "Championship White • 6MT"
 
 
+def test_interactive_plate_quad_and_approve_from_frame_studio(tmp_path: Path) -> None:
+    """Verify getting initial plate quad, live rendering with custom quad, and approving a review photo from Frame Studio."""
+    client, review_dir, output_dir, _ = _setup_review_fixture(tmp_path)
+    auth = ("reviewer", "s3cr3t-pass")
+
+    # 1. Fetch initial 4-corner plate coordinates for review photo
+    quad_resp = client.get("/api/plate-quad/SBA8888X/01_rear_angle.jpg", auth=auth)
+    assert quad_resp.status_code == 200
+    qdata = quad_resp.json()
+    assert qdata["ok"] is True
+    assert len(qdata["quad_pct"]) == 4
+
+    # 2. Preview render with user-adjusted tilted 4-corner coordinates
+    render_resp = client.get(
+        "/api/frame-render?car_id=SBA8888X&filename=01_rear_angle.jpg&ratio=1:1&quad=30,58,68,64,66,76,28,70",
+        auth=auth,
+    )
+    assert render_resp.status_code == 200
+    assert render_resp.content[:2] == b"\xff\xd8"
+
+    # 3. Approve & Save from Frame Studio with custom quad_pct
+    save_resp = client.post(
+        "/api/frame-save",
+        json={
+            "car_id": "SBA8888X",
+            "filename": "01_rear_angle.jpg",
+            "ratio": "1:1",
+            "fit_mode": "fit",
+            "template_style": "clean_white",
+            "caption": True,
+            "car_model": "Porsche 911 GT3",
+            "car_price": "",
+            "car_specs": "PDK • Singapore",
+            "in_place": True,
+            "quad_pct": [[30.0, 58.0], [68.0, 64.0], [66.0, 76.0], [28.0, 70.0]],
+        },
+        auth=auth,
+    )
+    assert save_resp.status_code == 200
+    sdata = save_resp.json()
+    assert sdata["ok"] is True
+    assert sdata["approved_from_review"] is True
+    assert (output_dir / "SBA8888X" / "01_rear_angle.jpg").exists()
+    assert not (review_dir / "SBA8888X" / "01_rear_angle.jpg").exists()
+
+
+
 
 
 

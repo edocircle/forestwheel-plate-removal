@@ -44,6 +44,7 @@ from fwphotos.detect import (
 )
 from fwphotos.overlay import (
     apply_plate_overlays,
+    estimate_plate_corners,
     load_overlay_rgba,
     warp_and_composite_single,
 )
@@ -1268,8 +1269,49 @@ def create_review_app(
             }
         )
 
-    def _resolve_covered_bgr_for_frame(car_id: str | None, filename: str | None) -> np.ndarray:
-        """Resolve the plate-covered vehicle image for Frame Template Editor."""
+    def _find_original_bgr(car_id: str, filename: str) -> np.ndarray | None:
+        """Find the original (before plate cover) BGR vehicle image for manual plate calibration."""
+        safe_car = _validate_path_segment(car_id)
+        safe_name = _validate_path_segment(filename)
+        stem = Path(safe_name).stem
+
+        search_dirs = [
+            inbox_dir if safe_car == "_root" else (inbox_dir / safe_car),
+            review_dir if safe_car == "_root" else (review_dir / safe_car),
+            Path(paths_cfg.get("input_dir", "data/test_photos")),
+            output_dir if safe_car == "_root" else (output_dir / safe_car),
+        ]
+        for sdir in search_dirs:
+            if not sdir.exists():
+                continue
+            exact = sdir / safe_name
+            if exact.is_file():
+                return load_image_bgr(exact)
+            for ext in supported_exts:
+                cand = sdir / f"{stem}{ext}"
+                if cand.is_file():
+                    return load_image_bgr(cand)
+        return None
+
+    def _resolve_covered_bgr_for_frame(
+        car_id: str | None,
+        filename: str | None,
+        custom_quad_pct: list[list[float]] | None = None,
+    ) -> np.ndarray:
+        """Resolve the plate-covered vehicle image for Frame Template Editor (with optional manual 4-corner quad)."""
+        if car_id and filename and custom_quad_pct and len(custom_quad_pct) == 4 and overlay_bgra is not None:
+            orig_bgr = _find_original_bgr(car_id, filename)
+            if orig_bgr is not None:
+                img_h, img_w = orig_bgr.shape[:2]
+                pts = np.array(
+                    [[p[0] * img_w / 100.0, p[1] * img_h / 100.0] for p in custom_quad_pct],
+                    dtype=np.float32,
+                )
+                feather_px = int(settings.get("overlay", {}).get("feather_px", 5))
+                return warp_and_composite_single(
+                    orig_bgr, overlay_bgra, pts, feather_px=feather_px
+                )
+
         if car_id and filename:
             safe_car = _validate_path_segment(car_id)
             safe_name = _validate_path_segment(filename)
@@ -1311,6 +1353,41 @@ def create_review_app(
 
         return np.full((720, 1280, 3), (225, 230, 238), dtype=np.uint8)
 
+    @app.get("/api/plate-quad/{car_id}/{filename}")
+    def api_get_plate_quad(
+        car_id: str,
+        filename: str,
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Return initial 4-corner plate coordinates (in 0..100% of original image) for interactive adjustment."""
+        orig_bgr = _find_original_bgr(car_id, filename)
+        if orig_bgr is None:
+            raise HTTPException(status_code=404, detail="Vehicle photo not found.")
+
+        img_h, img_w = orig_bgr.shape[:2]
+        dets = _get_detector().detect_array(orig_bgr, min_conf=low_conf_floor)
+        if dets:
+            best = max(dets, key=lambda d: d.confidence)
+            quad_px, mode = estimate_plate_corners(orig_bgr, best.bbox, settings.get("overlay", {}))
+            quad_pct = [
+                [round(float(pt[0]) * 100.0 / img_w, 2), round(float(pt[1]) * 100.0 / img_h, 2)]
+                for pt in quad_px
+            ]
+        else:
+            # Default centered lower-bumper rectangle so user can drag it onto the plate
+            quad_pct = [[36.0, 62.0], [64.0, 62.0], [64.0, 74.0], [36.0, 74.0]]
+            mode = "manual_default"
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "car_id": car_id,
+                "filename": filename,
+                "mode": mode,
+                "quad_pct": quad_pct,
+            }
+        )
+
     @app.get("/api/frame-render")
     def api_frame_render(
         car_id: str | None = Query(default=None),
@@ -1324,11 +1401,26 @@ def create_review_app(
         car_model: str = Query(""),
         car_price: str = Query(""),
         car_specs: str = Query(""),
+        quad: str | None = Query(default=None),
         download: int = Query(0),
         _user: str = Depends(verify_auth),
     ) -> Response:
         """Render an Apple-style Frame Studio image (1:1, 16:9, 9:16; Fit with blur vs Fill with pan; 5 templates)."""
-        bgr = _resolve_covered_bgr_for_frame(car_id, filename)
+        parsed_quad: list[list[float]] | None = None
+        if quad:
+            try:
+                nums = [float(x) for x in quad.split(",") if x.strip()]
+                if len(nums) == 8:
+                    parsed_quad = [
+                        [nums[0], nums[1]],
+                        [nums[2], nums[3]],
+                        [nums[4], nums[5]],
+                        [nums[6], nums[7]],
+                    ]
+            except ValueError:
+                parsed_quad = None
+
+        bgr = _resolve_covered_bgr_for_frame(car_id, filename, custom_quad_pct=parsed_quad)
         rendered_pil = render_apple_frame_studio(
             image_bgr=bgr,
             ratio=ratio,
@@ -1355,9 +1447,9 @@ def create_review_app(
     @app.post("/api/frame-save")
     def api_frame_save(
         payload: dict[str, Any] = Body(...),
-        _user: str = Depends(verify_auth),
+        user: str = Depends(verify_auth),
     ) -> JSONResponse:
-        """Save a framed studio photo directly into the car's Gallery (output/<car_id>/)."""
+        """Apply adjusted plate cover + frame and save/approve the photo into the car's Gallery (output/<car_id>/)."""
         raw_cid = str(payload.get("car_id") or "FW-STUDIO")
         safe_car = _validate_path_segment(raw_cid) if raw_cid == "_root" else _sanitize_car_id(raw_cid)
         filename = str(payload.get("filename") or "studio.jpg")
@@ -1370,8 +1462,10 @@ def create_review_app(
         car_model = str(payload.get("car_model") or "")
         car_price = str(payload.get("car_price") or "")
         car_specs = str(payload.get("car_specs") or "")
+        quad_pct = payload.get("quad_pct") if isinstance(payload.get("quad_pct"), list) else None
+        in_place = bool(payload.get("in_place", False))
 
-        bgr = _resolve_covered_bgr_for_frame(safe_car, filename)
+        bgr = _resolve_covered_bgr_for_frame(safe_car, filename, custom_quad_pct=quad_pct)
         rendered_pil = render_apple_frame_studio(
             image_bgr=bgr,
             ratio=ratio,
@@ -1389,20 +1483,44 @@ def create_review_app(
         target_dir.mkdir(parents=True, exist_ok=True)
         stem = Path(filename).stem
         r_slug = ratio.replace(":", "x")
-        out_name = f"{stem}_frame_{template_style}_{r_slug}.jpg"
+
+        # Check if this image is currently in review/; if so (or if in_place=True), write to <stem>.jpg and approve it
+        rev_candidate = (review_dir if safe_car == "_root" else (review_dir / safe_car)) / filename
+        was_in_review = rev_candidate.is_file()
+
+        if was_in_review or in_place:
+            out_name = f"{stem}.jpg"
+        else:
+            out_name = f"{stem}_frame_{template_style}_{r_slug}.jpg"
+
         out_path = target_dir / out_name
         rendered_pil.convert("RGB").save(out_path, format="JPEG", quality=jpeg_quality)
 
-        # Cache the unframed plate-covered base for the new saved file too
+        # Cache the unframed plate-covered base for both <stem>.jpg and <out_name>
         cache_f = output_dir / "_covered_cache" / safe_car / f"{Path(out_name).stem}.jpg"
         cache_f.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(cache_f), bgr)
+
+        if was_in_review:
+            rev_candidate.unlink(missing_ok=True)
+            decisions = _load_json_dict(decisions_file)
+            key = f"{safe_car}/{filename}"
+            decisions[key] = {
+                "status": "approved",
+                "approved_by": user,
+                "ratio": ratio,
+                "output_path": str(out_path),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _save_json_dict(decisions_file, decisions)
+            logger.info("Approved review item from Frame Studio %s -> %s (by %s)", key, out_path, user)
 
         return JSONResponse(
             content={
                 "ok": True,
                 "car_id": safe_car,
                 "saved_filename": out_name,
+                "approved_from_review": was_in_review,
                 "output_path": str(out_path),
             }
         )

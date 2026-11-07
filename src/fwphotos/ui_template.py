@@ -373,21 +373,30 @@ tailwind.config = {
           <button type="button" onclick="setStudioRatio('9:16')" id="st-ratio-9:16" class="px-4 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all">9:16 Story</button>
         </div>
 
-        <!-- Fit Mode Toggle: "Fit to frame" (blurred background) vs "Fill frame" (crop + drag to reposition) -->
-        <div class="flex items-center bg-surface-container p-1 rounded-xl">
-          <button type="button" onclick="setStudioFitMode('fit')" id="st-fit-fit" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-white text-primary shadow-sm transition-all flex items-center gap-1.5">
-            <span class="material-symbols-outlined text-[16px]">fit_screen</span>
-            <span>Fit to frame (Blur BG)</span>
-          </button>
-          <button type="button" onclick="setStudioFitMode('fill')" id="st-fit-fill" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all flex items-center gap-1.5">
-            <span class="material-symbols-outlined text-[16px]">aspect_ratio</span>
-            <span>Fill frame (Crop &amp; Drag)</span>
+        <!-- Fit Mode Toggle + Adjust Plate Cover Toggle -->
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="flex items-center bg-surface-container p-1 rounded-xl">
+            <button type="button" onclick="setStudioFitMode('fit')" id="st-fit-fit" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-primary shadow-sm transition-all flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-[16px]">fit_screen</span>
+              <span>Fit (Blur BG)</span>
+            </button>
+            <button type="button" onclick="setStudioFitMode('fill')" id="st-fit-fill" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-[16px]">aspect_ratio</span>
+              <span>Fill (Crop)</span>
+            </button>
+          </div>
+
+          <button type="button" onclick="togglePlateAdjustMode()" id="btn-toggle-plate-adjust"
+                  class="px-3.5 py-2 rounded-xl text-xs font-bold border border-primary/30 bg-primary-fixed/40 text-primary hover:bg-primary hover:text-white transition-all flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-[16px]">transform</span>
+            <span id="lbl-toggle-plate-adjust">Adjust Plate Cover</span>
           </button>
         </div>
       </div>
 
-      <!-- Canvas Preview Stage -->
+      <!-- Canvas Preview Stage (switches between Framed Preview and Interactive 4-Corner Plate Calibration) -->
       <div class="apple-card-white rounded-[28px] p-4 sm:p-8 flex flex-col items-center justify-center min-h-[380px] sm:min-h-[480px] relative overflow-hidden bg-surface-container-low">
+        <!-- Standard Framed Preview -->
         <div id="studio-canvas-wrapper"
              onmousedown="startCanvasPan(event)"
              onmousemove="moveCanvasPan(event)"
@@ -401,6 +410,76 @@ tailwind.config = {
           <div id="studio-pan-hint" class="hidden absolute top-3 left-1/2 -translate-x-1/2 apple-glass px-3.5 py-1 rounded-full text-[11px] font-semibold text-on-surface shadow-sm border border-white/50 flex items-center gap-1.5">
             <span class="material-symbols-outlined text-[14px] text-primary">open_with</span>
             <span>Drag photo to reposition crop</span>
+          </div>
+        </div>
+
+        <!-- Interactive Plate Cover Calibration Stage (Move & Drag 4 Corners over Original Photo) -->
+        <div id="plate-adjust-stage" class="hidden w-full flex flex-col items-center space-y-3">
+          <div class="w-full flex flex-wrap items-center justify-between gap-2 px-1">
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 text-[11px] font-bold flex items-center gap-1">
+                <span class="material-symbols-outlined text-[14px]">pan_tool_alt</span>
+                <span>Drag plate cover to move • Drag 4 corners to match angle</span>
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="resetPlateQuadToAuto()" class="px-3 py-1.5 rounded-full bg-white border border-outline-variant/40 text-xs font-semibold text-on-surface-variant hover:text-on-surface">
+                Auto-Detect Reset
+              </button>
+              <button type="button" onclick="togglePlateAdjustMode(false)" class="px-3.5 py-1.5 rounded-full bg-primary text-white text-xs font-semibold flex items-center gap-1">
+                <span class="material-symbols-outlined text-[14px]">visibility</span>
+                <span>Preview in Frame</span>
+              </button>
+              <button type="button" onclick="approveOrSaveCurrentStudioPhoto()" class="px-4 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm flex items-center gap-1">
+                <span class="material-symbols-outlined text-[14px]">verified</span>
+                <span id="stage-approve-btn-label">Approve &amp; Save</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="plate-calib-container"
+               onmousemove="onPlateCalibMove(event)"
+               onmouseup="onPlateCalibUp()"
+               onmouseleave="onPlateCalibUp()"
+               ontouchmove="onPlateCalibMove(event)"
+               ontouchend="onPlateCalibUp()"
+               class="relative inline-block rounded-2xl overflow-hidden shadow-apple-float border border-outline-variant/40 bg-black select-none max-h-[420px]">
+            <img id="plate-calib-orig-img" src="" alt="Original Vehicle" class="max-h-[420px] w-auto block pointer-events-none select-none"/>
+
+            <!-- SVG Polygon, Live Plate Cover Preview & Draggable Handles Overlay -->
+            <svg id="plate-calib-svg" viewBox="0 0 100 100" preserveAspectRatio="none"
+                 class="absolute inset-0 w-full h-full overflow-visible">
+              <polygon id="plate-calib-poly" points="36,62 64,62 64,74 36,74"
+                       onmousedown="startPlateBoxDrag(event)"
+                       ontouchstart="startPlateBoxDrag(event)"
+                       fill="rgba(0, 88, 188, 0.32)" stroke="#ffffff" stroke-width="0.7"
+                       class="cursor-move"/>
+              <image id="plate-calib-cover-img" href="/media/plate-overlay"
+                     x="36" y="62" width="28" height="12"
+                     preserveAspectRatio="none" pointer-events="none" opacity="0.92"/>
+            </svg>
+
+            <!-- 4 Corner Drag Handles (TL, TR, BR, BL) + Center Move Handle -->
+            <div id="handle-corner-0" onmousedown="startCornerDrag(0, event)" ontouchstart="startCornerDrag(0, event)"
+                 class="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-white border-2 border-primary shadow-md cursor-nwse-resize z-20 flex items-center justify-center" title="Drag Top-Left Corner">
+              <div class="w-1.5 h-1.5 rounded-full bg-primary"></div>
+            </div>
+            <div id="handle-corner-1" onmousedown="startCornerDrag(1, event)" ontouchstart="startCornerDrag(1, event)"
+                 class="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-white border-2 border-primary shadow-md cursor-nesw-resize z-20 flex items-center justify-center" title="Drag Top-Right Corner">
+              <div class="w-1.5 h-1.5 rounded-full bg-primary"></div>
+            </div>
+            <div id="handle-corner-2" onmousedown="startCornerDrag(2, event)" ontouchstart="startCornerDrag(2, event)"
+                 class="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-white border-2 border-primary shadow-md cursor-nwse-resize z-20 flex items-center justify-center" title="Drag Bottom-Right Corner">
+              <div class="w-1.5 h-1.5 rounded-full bg-primary"></div>
+            </div>
+            <div id="handle-corner-3" onmousedown="startCornerDrag(3, event)" ontouchstart="startCornerDrag(3, event)"
+                 class="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-white border-2 border-primary shadow-md cursor-nesw-resize z-20 flex items-center justify-center" title="Drag Bottom-Left Corner">
+              <div class="w-1.5 h-1.5 rounded-full bg-primary"></div>
+            </div>
+            <div id="handle-plate-center" onmousedown="startPlateBoxDrag(event)" ontouchstart="startPlateBoxDrag(event)"
+                 class="absolute w-7 h-7 -ml-3.5 -mt-3.5 rounded-full bg-primary text-white border-2 border-white shadow-md cursor-move z-10 flex items-center justify-center" title="Drag to move entire plate cover">
+              <span class="material-symbols-outlined text-[14px]">open_with</span>
+            </div>
           </div>
         </div>
       </div>
@@ -491,9 +570,41 @@ tailwind.config = {
 
         <!-- Angle / Photo Queue for Selected Car -->
         <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2.5">Preview Photo</label>
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-on-surface-variant">Preview Photo</label>
+            <span id="studio-photo-status-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Approved</span>
+          </div>
           <div id="frame-photo-strip" class="grid grid-cols-4 gap-2 max-h-44 overflow-y-auto p-1">
             <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Photo Review & Plate Cover Position Actions -->
+        <div class="pt-3 border-t border-surface-container space-y-2.5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h4 class="text-sm font-bold text-on-surface">Plate Cover Position &amp; Review</h4>
+              <p id="studio-current-photo-name" class="text-[11px] text-on-surface-variant">Drag plate cover over photo to fix tilt or placement</p>
+            </div>
+          </div>
+          <div class="flex flex-col gap-2">
+            <button type="button" onclick="togglePlateAdjustMode()" id="btn-sidebar-adjust-plate"
+                    class="w-full py-2.5 px-3.5 rounded-xl border border-primary/30 bg-primary-fixed/40 hover:bg-primary hover:text-white text-primary font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
+              <span class="material-symbols-outlined text-[16px]">open_with</span>
+              <span id="lbl-sidebar-adjust-plate">Move / Adjust Plate Cover on Photo</span>
+            </button>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="approveOrSaveCurrentStudioPhoto()" id="btn-studio-approve-save"
+                      class="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5">
+                <span class="material-symbols-outlined text-[17px]">verified</span>
+                <span id="lbl-studio-approve-save">Approve &amp; Save Photo to Gallery</span>
+              </button>
+              <button type="button" onclick="rejectCurrentStudioPhoto()" id="btn-studio-reject"
+                      class="hidden py-3 px-3.5 rounded-2xl bg-error-container hover:bg-error hover:text-white text-error font-bold text-xs transition-all flex items-center justify-center gap-1" title="Reject this review photo">
+                <span class="material-symbols-outlined text-[16px]">block</span>
+                <span>Reject</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -530,20 +641,20 @@ tailwind.config = {
         </div>
 
         <!-- Primary Action Buttons: Apply Frame Config to All Uploads & Export -->
-        <div class="pt-3 space-y-2.5">
+        <div class="pt-3 border-t border-surface-container space-y-2.5">
           <button type="button" onclick="saveGlobalFramePreset(false)" id="btn-save-frame-preset"
-                  class="w-full py-3.5 rounded-2xl bg-gradient-to-b from-primary-container to-primary text-white font-semibold text-sm shadow-lg shadow-primary/20 hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
-            <span class="material-symbols-outlined text-[19px]">check_circle</span>
+                  class="w-full py-3 rounded-2xl bg-gradient-to-b from-primary-container to-primary text-white font-semibold text-xs shadow-lg shadow-primary/20 hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+            <span class="material-symbols-outlined text-[18px]">check_circle</span>
             <span>Save as Default Upload Frame</span>
           </button>
           <div class="grid grid-cols-2 gap-2.5">
-            <button type="button" onclick="saveStudioFrameToGallery()" id="btn-save-frame-gallery"
-                    class="py-3 rounded-2xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
+            <button type="button" onclick="saveStudioFrameToGallery(false)" id="btn-save-frame-gallery"
+                    class="py-2.5 rounded-2xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
               <span class="material-symbols-outlined text-[17px] text-primary">bookmark_add</span>
               <span>Save Copy</span>
             </button>
             <button type="button" onclick="exportStudioFrame()"
-                    class="py-3 rounded-2xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
+                    class="py-2.5 rounded-2xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-semibold text-xs transition-all flex items-center justify-center gap-1.5">
               <span class="material-symbols-outlined text-[17px] text-primary">ios_share</span>
               <span>Export JPG</span>
             </button>
@@ -750,7 +861,7 @@ tailwind.config = {
   let modalCompareMode = 'after';
   let pendingDeleteTargetCarId = null;
 
-  // Frame Studio State
+  // Frame Studio & Interactive Plate Cover Adjustment State
   let studioCarId = null;
   let studioFilename = null;
   let studioRatio = '1:1';
@@ -762,6 +873,15 @@ tailwind.config = {
   let panStartX = 0;
   let panStartY = 0;
   let studioDebounceTimer = null;
+
+  // 4-Corner Plate Cover Calibration State (coordinates in 0..100% of original image)
+  let plateAdjustMode = false;
+  let studioQuadPct = [[36, 62], [64, 62], [64, 74], [36, 74]];
+  let plateQuadModified = false;
+  let activeCornerIdx = -1;
+  let isDraggingPlateBox = false;
+  let plateDragStartPt = { x: 0, y: 0 };
+  let plateDragStartQuad = null;
 
   const SAMPLE_PLATES = ['SXX 1234 A', 'SBA 8888 X', 'SGP 9110 T', 'SLR 4580 M', 'SKL 2026 Z'];
 
@@ -1443,7 +1563,7 @@ tailwind.config = {
               ` : ''}
               <button type="button" onclick="closeCarDetailModal(); openPhotoInFrames('${activeModalCarId}', '${p.filename}')"
                       class="px-3 py-1.5 rounded-xl bg-primary-fixed text-primary text-xs font-semibold hover:bg-primary hover:text-white transition-colors">
-                Frame
+                ${isReview ? 'Edit &amp; Approve' : 'Frame'}
               </button>
             </div>
           </div>
@@ -1618,17 +1738,72 @@ tailwind.config = {
   }
 
   // =========================================================================
-  // SCREEN 3: FRAME TEMPLATE EDITOR (1:1, 16:9, 9:16 + FIT/FILL + 5 TEMPLATES)
+  // SCREEN 3: FRAME TEMPLATE EDITOR + INTERACTIVE PLATE COVER CALIBRATION
   // =========================================================================
+  function getCurrentStudioPhotoObj() {
+    if (!studioCarId || !studioFilename) return null;
+    const photos = getCarPhotos(studioCarId);
+    return photos.find(p => p.filename === studioFilename) || null;
+  }
+
+  function updateStudioReviewStatusUI() {
+    const photoObj = getCurrentStudioPhotoObj();
+    const isReview = photoObj && photoObj.status !== 'ready';
+    const badge = document.getElementById('studio-photo-status-badge');
+    const nameEl = document.getElementById('studio-current-photo-name');
+    const btnApprove = document.getElementById('btn-studio-approve-save');
+    const lblApprove = document.getElementById('lbl-studio-approve-save');
+    const stageLblApprove = document.getElementById('stage-approve-btn-label');
+    const btnReject = document.getElementById('btn-studio-reject');
+
+    if (nameEl) {
+      if (photoObj) {
+        nameEl.textContent = isReview
+          ? `${photoObj.filename} • Needs review (${photoObj.reason || 'adjust plate cover'})`
+          : `${photoObj.filename} • Drag plate cover to fine-tune placement`;
+      } else {
+        nameEl.textContent = 'Drag plate cover over photo to fix tilt or placement';
+      }
+    }
+
+    if (badge) {
+      if (isReview) {
+        badge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800';
+        badge.textContent = 'Needs Review';
+      } else {
+        badge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800';
+        badge.textContent = 'Approved';
+      }
+    }
+
+    if (btnApprove && lblApprove) {
+      if (isReview) {
+        btnApprove.className = 'flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5';
+        lblApprove.textContent = 'Approve & Save Photo to Gallery';
+        if (stageLblApprove) stageLblApprove.textContent = 'Approve & Save';
+      } else {
+        btnApprove.className = 'flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5';
+        lblApprove.textContent = 'Approve & Save Plate Fix';
+        if (stageLblApprove) stageLblApprove.textContent = 'Save Plate Fix';
+      }
+    }
+
+    if (btnReject) {
+      btnReject.classList.toggle('hidden', !isReview);
+    }
+  }
+
   function openCarInFrames(carId) {
     studioCarId = carId;
     const photos = getCarPhotos(carId);
-    studioFilename = photos.length > 0 ? photos[0].filename : null;
+    const revPhoto = photos.find(p => p.status !== 'ready');
+    studioFilename = revPhoto ? revPhoto.filename : (photos.length > 0 ? photos[0].filename : null);
     const meta = getCarMeta(carId);
     document.getElementById('studio-model-input').value = meta.car_model;
     document.getElementById('studio-price-input').value = meta.car_price;
     document.getElementById('studio-specs-input').value = meta.car_specs;
     switchTab('frames');
+    loadPlateQuadForCurrentPhoto(Boolean(revPhoto));
   }
 
   function openPhotoInFrames(carId, filename) {
@@ -1638,7 +1813,10 @@ tailwind.config = {
     document.getElementById('studio-model-input').value = meta.car_model;
     document.getElementById('studio-price-input').value = meta.car_price;
     document.getElementById('studio-specs-input').value = meta.car_specs;
+    const pObj = getCarPhotos(carId).find(p => p.filename === filename);
+    const isRev = Boolean(pObj && pObj.status !== 'ready');
     switchTab('frames');
+    loadPlateQuadForCurrentPhoto(isRev);
   }
 
   function populateFrameStudioSelectors() {
@@ -1658,6 +1836,7 @@ tailwind.config = {
     }).join('');
 
     renderFramePhotoStrip();
+    updateStudioReviewStatusUI();
   }
 
   function onFrameCarChange() {
@@ -1669,7 +1848,9 @@ tailwind.config = {
     document.getElementById('studio-model-input').value = meta.car_model;
     document.getElementById('studio-price-input').value = meta.car_price;
     document.getElementById('studio-specs-input').value = meta.car_specs;
+    plateQuadModified = false;
     renderFramePhotoStrip();
+    loadPlateQuadForCurrentPhoto(false);
     refreshStudioCanvas();
   }
 
@@ -1677,24 +1858,219 @@ tailwind.config = {
     const strip = document.getElementById('frame-photo-strip');
     if (!strip || !studioCarId) return;
     const photos = getCarPhotos(studioCarId);
-    if (!studioFilename && photos.length > 0) {
-      studioFilename = photos[0].filename;
+    if (!studioFilename || !photos.some(p => p.filename === studioFilename)) {
+      studioFilename = photos.length > 0 ? photos[0].filename : null;
     }
     strip.innerHTML = photos.map(p => {
       const active = p.filename === studioFilename;
+      const isRev = p.status !== 'ready';
       const thumbUrl = getMediaUrlForPhoto(studioCarId, p, 'after');
       return `
         <button type="button" onclick="selectStudioPhoto('${p.filename}')"
-                class="relative aspect-square rounded-xl overflow-hidden border-2 ${active ? 'border-primary ring-2 ring-primary/30' : 'border-transparent opacity-75 hover:opacity-100'} transition-all">
+                class="relative aspect-square rounded-xl overflow-hidden border-2 ${active ? 'border-primary ring-2 ring-primary/30' : 'border-transparent opacity-75 hover:opacity-100'} transition-all"
+                title="${p.filename}${isRev ? ' (Needs Review)' : ''}">
           <img src="${thumbUrl}" alt="${p.filename}" class="w-full h-full object-cover"/>
+          ${isRev ? `<span class="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white"></span>` : ''}
         </button>
       `;
     }).join('');
+    updateStudioReviewStatusUI();
   }
 
   function selectStudioPhoto(fn) {
     studioFilename = fn;
+    plateQuadModified = false;
     renderFramePhotoStrip();
+    const pObj = getCurrentStudioPhotoObj();
+    const isRev = Boolean(pObj && pObj.status !== 'ready');
+    loadPlateQuadForCurrentPhoto(isRev);
+    refreshStudioCanvas();
+  }
+
+  // Interactive 4-Corner & Center Move Plate Cover Adjustment
+  async function loadPlateQuadForCurrentPhoto(autoEnterAdjust = false) {
+    updateStudioReviewStatusUI();
+    if (!studioCarId || !studioFilename) return;
+
+    const origImg = document.getElementById('plate-calib-orig-img');
+    if (origImg) {
+      origImg.src = `/media/original/${encodeURIComponent(studioCarId)}/${encodeURIComponent(studioFilename)}?full=1`;
+    }
+    const coverSvgImg = document.getElementById('plate-calib-cover-img');
+    if (coverSvgImg) {
+      coverSvgImg.setAttribute('href', `/media/plate-overlay?t=${Date.now()}`);
+    }
+
+    try {
+      const res = await fetch(`/api/plate-quad/${encodeURIComponent(studioCarId)}/${encodeURIComponent(studioFilename)}`, {
+        credentials: 'same-origin'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.quad_pct) && data.quad_pct.length === 4) {
+          studioQuadPct = data.quad_pct.map(pt => [Number(pt[0]), Number(pt[1])]);
+          plateQuadModified = (data.mode === 'manual_default');
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load plate quad:', e);
+    }
+
+    renderPlateCalibOverlay();
+    if (autoEnterAdjust) {
+      togglePlateAdjustMode(true);
+    }
+  }
+
+  function togglePlateAdjustMode(forceState) {
+    plateAdjustMode = (typeof forceState === 'boolean') ? forceState : !plateAdjustMode;
+    const stage = document.getElementById('plate-adjust-stage');
+    const canvasWrap = document.getElementById('studio-canvas-wrapper');
+    const topBtn = document.getElementById('btn-toggle-plate-adjust');
+    const topLbl = document.getElementById('lbl-toggle-plate-adjust');
+    const sideLbl = document.getElementById('lbl-sidebar-adjust-plate');
+
+    if (stage) stage.classList.toggle('hidden', !plateAdjustMode);
+    if (canvasWrap) canvasWrap.classList.toggle('hidden', plateAdjustMode);
+
+    if (topBtn && topLbl) {
+      if (plateAdjustMode) {
+        topBtn.className = 'px-3.5 py-2 rounded-xl text-xs font-bold bg-primary text-white shadow-sm transition-all flex items-center gap-1.5';
+        topLbl.textContent = 'Preview in Frame';
+      } else {
+        topBtn.className = 'px-3.5 py-2 rounded-xl text-xs font-bold border border-primary/30 bg-primary-fixed/40 text-primary hover:bg-primary hover:text-white transition-all flex items-center gap-1.5';
+        topLbl.textContent = 'Adjust Plate Cover';
+      }
+    }
+    if (sideLbl) {
+      sideLbl.textContent = plateAdjustMode ? 'Preview Adjusted Plate in Frame' : 'Move / Adjust Plate Cover on Photo';
+    }
+
+    if (plateAdjustMode) {
+      if (studioCarId && studioFilename) {
+        const origImg = document.getElementById('plate-calib-orig-img');
+        if (origImg && !origImg.getAttribute('src')) {
+          loadPlateQuadForCurrentPhoto(true);
+        } else {
+          renderPlateCalibOverlay();
+        }
+      }
+    } else {
+      refreshStudioCanvas();
+    }
+  }
+
+  function renderPlateCalibOverlay() {
+    const poly = document.getElementById('plate-calib-poly');
+    if (!poly || !studioQuadPct || studioQuadPct.length !== 4) return;
+
+    const ptsStr = studioQuadPct.map(pt => `${pt[0].toFixed(2)},${pt[1].toFixed(2)}`).join(' ');
+    poly.setAttribute('points', ptsStr);
+
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < 4; i++) {
+      const h = document.getElementById(`handle-corner-${i}`);
+      if (h) {
+        h.style.left = `${studioQuadPct[i][0]}%`;
+        h.style.top = `${studioQuadPct[i][1]}%`;
+      }
+      cx += studioQuadPct[i][0];
+      cy += studioQuadPct[i][1];
+    }
+    cx /= 4.0;
+    cy /= 4.0;
+
+    const centerHandle = document.getElementById('handle-plate-center');
+    if (centerHandle) {
+      centerHandle.style.left = `${cx}%`;
+      centerHandle.style.top = `${cy}%`;
+    }
+
+    // Position and tilt the live plate cover SVG image inside the quadrilateral
+    const coverImg = document.getElementById('plate-calib-cover-img');
+    if (coverImg) {
+      const topW = Math.hypot(studioQuadPct[1][0] - studioQuadPct[0][0], studioQuadPct[1][1] - studioQuadPct[0][1]);
+      const botW = Math.hypot(studioQuadPct[2][0] - studioQuadPct[3][0], studioQuadPct[2][1] - studioQuadPct[3][1]);
+      const leftH = Math.hypot(studioQuadPct[3][0] - studioQuadPct[0][0], studioQuadPct[3][1] - studioQuadPct[0][1]);
+      const rightH = Math.hypot(studioQuadPct[2][0] - studioQuadPct[1][0], studioQuadPct[2][1] - studioQuadPct[1][1]);
+      const avgW = Math.max(4, (topW + botW) / 2.0);
+      const avgH = Math.max(2, (leftH + rightH) / 2.0);
+      const angleDeg = Math.atan2(
+        (studioQuadPct[1][1] - studioQuadPct[0][1]) + (studioQuadPct[2][1] - studioQuadPct[3][1]),
+        (studioQuadPct[1][0] - studioQuadPct[0][0]) + (studioQuadPct[2][0] - studioQuadPct[3][0])
+      ) * 180.0 / Math.PI;
+
+      coverImg.setAttribute('x', (cx - avgW / 2.0).toFixed(2));
+      coverImg.setAttribute('y', (cy - avgH / 2.0).toFixed(2));
+      coverImg.setAttribute('width', avgW.toFixed(2));
+      coverImg.setAttribute('height', avgH.toFixed(2));
+      coverImg.setAttribute('transform', `rotate(${angleDeg.toFixed(2)} ${cx.toFixed(2)} ${cy.toFixed(2)})`);
+    }
+  }
+
+  function getCalibRelativePct(ev) {
+    const container = document.getElementById('plate-calib-container');
+    if (!container) return { x: 50, y: 50 };
+    const rect = container.getBoundingClientRect();
+    const pt = ev.touches ? ev.touches[0] : ev;
+    const x = Math.max(0, Math.min(100, ((pt.clientX - rect.left) / Math.max(1, rect.width)) * 100.0));
+    const y = Math.max(0, Math.min(100, ((pt.clientY - rect.top) / Math.max(1, rect.height)) * 100.0));
+    return { x, y };
+  }
+
+  function startCornerDrag(idx, ev) {
+    if (ev) {
+      ev.stopPropagation();
+      if (ev.cancelable) ev.preventDefault();
+    }
+    activeCornerIdx = idx;
+    isDraggingPlateBox = false;
+    plateQuadModified = true;
+  }
+
+  function startPlateBoxDrag(ev) {
+    if (ev) {
+      ev.stopPropagation();
+      if (ev.cancelable) ev.preventDefault();
+    }
+    activeCornerIdx = -1;
+    isDraggingPlateBox = true;
+    plateQuadModified = true;
+    plateDragStartPt = getCalibRelativePct(ev);
+    plateDragStartQuad = studioQuadPct.map(pt => [pt[0], pt[1]]);
+  }
+
+  function onPlateCalibMove(ev) {
+    if (activeCornerIdx < 0 && !isDraggingPlateBox) return;
+    if (ev && ev.cancelable) ev.preventDefault();
+    const cur = getCalibRelativePct(ev);
+
+    if (activeCornerIdx >= 0) {
+      studioQuadPct[activeCornerIdx] = [cur.x, cur.y];
+      renderPlateCalibOverlay();
+    } else if (isDraggingPlateBox && plateDragStartQuad) {
+      const dx = cur.x - plateDragStartPt.x;
+      const dy = cur.y - plateDragStartPt.y;
+      studioQuadPct = plateDragStartQuad.map(pt => [
+        Math.max(0, Math.min(100, pt[0] + dx)),
+        Math.max(0, Math.min(100, pt[1] + dy))
+      ]);
+      renderPlateCalibOverlay();
+    }
+  }
+
+  function onPlateCalibUp() {
+    if (activeCornerIdx >= 0 || isDraggingPlateBox) {
+      activeCornerIdx = -1;
+      isDraggingPlateBox = false;
+      debouncedRefreshStudio();
+    }
+  }
+
+  async function resetPlateQuadToAuto() {
+    plateQuadModified = false;
+    await loadPlateQuadForCurrentPhoto(true);
     refreshStudioCanvas();
   }
 
@@ -1799,8 +2175,11 @@ tailwind.config = {
       credentials: 'same-origin'
     });
     if (res.ok) {
+      const ts = Date.now();
       const prev = document.getElementById('plate-overlay-preview-img');
-      if (prev) prev.src = '/media/plate-overlay?t=' + Date.now();
+      if (prev) prev.src = '/media/plate-overlay?t=' + ts;
+      const coverSvgImg = document.getElementById('plate-calib-cover-img');
+      if (coverSvgImg) coverSvgImg.setAttribute('href', '/media/plate-overlay?t=' + ts);
       if (fb) {
         fb.textContent = `Plate cover updated (${file.name}) and applied to all vehicles!`;
         fb.classList.remove('hidden');
@@ -1818,8 +2197,11 @@ tailwind.config = {
       credentials: 'same-origin'
     });
     if (res.ok) {
+      const ts = Date.now();
       const prev = document.getElementById('plate-overlay-preview-img');
-      if (prev) prev.src = '/media/plate-overlay?t=' + Date.now();
+      if (prev) prev.src = '/media/plate-overlay?t=' + ts;
+      const coverSvgImg = document.getElementById('plate-calib-cover-img');
+      if (coverSvgImg) coverSvgImg.setAttribute('href', '/media/plate-overlay?t=' + ts);
       if (fb) {
         fb.textContent = 'Reset to default Forest Wheel plate cover.';
         fb.classList.remove('hidden');
@@ -1846,10 +2228,15 @@ tailwind.config = {
       car_model: model,
       car_price: price,
       car_specs: specs,
-      download: String(download)
+      download: String(download),
+      t: String(Date.now())
     });
     if (studioCarId) params.set('car_id', studioCarId);
     if (studioFilename) params.set('filename', studioFilename);
+    if (plateQuadModified && studioQuadPct && studioQuadPct.length === 4) {
+      const flat = studioQuadPct.map(pt => `${pt[0].toFixed(2)},${pt[1].toFixed(2)}`).join(',');
+      params.set('quad', flat);
+    }
     return `/api/frame-render?${params.toString()}`;
   }
 
@@ -1889,39 +2276,72 @@ tailwind.config = {
     isPanning = false;
   }
 
-  async function saveStudioFrameToGallery() {
+  async function approveOrSaveCurrentStudioPhoto() {
+    await saveStudioFrameToGallery(true);
+  }
+
+  async function rejectCurrentStudioPhoto() {
+    if (!studioCarId || !studioFilename) return;
+    const fb = document.getElementById('studio-save-feedback');
+    const res = await fetch(`/api/reject/${encodeURIComponent(studioCarId)}/${encodeURIComponent(studioFilename)}`, {
+      method: 'POST',
+      credentials: 'same-origin'
+    });
+    if (res.ok) {
+      if (fb) {
+        fb.textContent = `Marked ${studioFilename} as rejected.`;
+        fb.classList.remove('hidden');
+        setTimeout(() => fb.classList.add('hidden'), 3500);
+      }
+      await fetchState();
+    }
+  }
+
+  async function saveStudioFrameToGallery(inPlace = false) {
     const captionOn = document.getElementById('studio-caption-toggle')?.checked ?? true;
     const model = document.getElementById('studio-model-input')?.value || '';
     const price = document.getElementById('studio-price-input')?.value || '';
     const specs = document.getElementById('studio-specs-input')?.value || '';
     const fb = document.getElementById('studio-save-feedback');
 
+    const bodyPayload = {
+      car_id: studioCarId || 'SXX-1234-A',
+      filename: studioFilename || 'showroom.jpg',
+      ratio: studioRatio,
+      fit_mode: studioFitMode,
+      template_style: studioTemplate,
+      offset_x: studioOffsetX,
+      offset_y: studioOffsetY,
+      caption: captionOn,
+      car_model: model,
+      car_price: price,
+      car_specs: specs,
+      in_place: Boolean(inPlace),
+      quad_pct: studioQuadPct
+    };
+
     const res = await fetch('/api/frame-save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({
-        car_id: studioCarId || 'SXX-1234-A',
-        filename: studioFilename || 'showroom.jpg',
-        ratio: studioRatio,
-        fit_mode: studioFitMode,
-        template_style: studioTemplate,
-        offset_x: studioOffsetX,
-        offset_y: studioOffsetY,
-        caption: captionOn,
-        car_model: model,
-        car_price: price,
-        car_specs: specs
-      })
+      body: JSON.stringify(bodyPayload)
     });
     if (res.ok) {
       const data = await res.json();
+      studioFilename = data.saved_filename || studioFilename;
+      plateQuadModified = false;
+      if (plateAdjustMode) {
+        togglePlateAdjustMode(false);
+      }
       if (fb) {
-        fb.textContent = `Saved ${data.saved_filename} to ${data.car_id} in Gallery!`;
+        fb.textContent = data.approved_from_review
+          ? `Approved & saved ${data.saved_filename} to ${data.car_id} in Gallery!`
+          : `Saved ${data.saved_filename} to ${data.car_id} in Gallery!`;
         fb.classList.remove('hidden');
-        setTimeout(() => fb.classList.add('hidden'), 3500);
+        setTimeout(() => fb.classList.add('hidden'), 4000);
       }
       await fetchState();
+      refreshStudioCanvas();
     }
   }
 
