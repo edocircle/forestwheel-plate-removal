@@ -213,6 +213,116 @@ def padded_bbox_quad(
     )
 
 
+def _estimate_quad_from_character_line(
+    image_bgr: np.ndarray,
+    bbox: tuple[int, int, int, int],
+    pad_ratio: float,
+    min_pad_px: int,
+) -> np.ndarray | None:
+    """Fit a parallel perspective quadrilateral directly to collinear plate character blobs via RANSAC.
+
+    Prevents bumper shadows, grille slats, or sub-frames from distorting the plate cover into
+    a wedge or shrinking it to a partial sliver.
+    """
+    img_h, img_w = image_bgr.shape[:2]
+    x1, y1, x2, y2 = bbox
+    bw, bh = x2 - x1, y2 - y1
+    if bw < 28 or bh < 12:
+        return None
+
+    roi = cv2.cvtColor(image_bgr[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(roi, (3, 3), 0)
+
+    best_inliers: list[tuple[float, float, float, float, float]] = []
+    best_score = -1.0
+
+    for inv in (False, True):
+        src = (255 - blur) if inv else blur
+        kw = max(15, int(round(bw * 0.14)) | 1)
+        kh = max(11, int(round(bh * 0.45)) | 1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kw, kh))
+        tophat = cv2.morphologyEx(src, cv2.MORPH_TOPHAT, kernel)
+        _, th = cv2.threshold(tophat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        num_l, _, stats, centroids = cv2.connectedComponentsWithStats(th)
+        cands: list[tuple[float, float, float, float, float]] = []
+        for i in range(1, num_l):
+            _, _, cw, ch, area = stats[i]
+            if (bw * 0.012) <= cw <= (bw * 0.26) and (bh * 0.12) <= ch <= (bh * 0.88):
+                aspect = ch / max(1.0, float(cw))
+                if 0.6 <= aspect <= 7.5 and area >= max(12, int(bw * bh * 0.0008)):
+                    cands.append(
+                        (
+                            float(centroids[i][0]),
+                            float(centroids[i][1]),
+                            float(cw),
+                            float(ch),
+                            float(area),
+                        )
+                    )
+
+        n = len(cands)
+        if n < 4:
+            continue
+        for i in range(n):
+            for j in range(i + 1, n):
+                xi, yi, _, hi, _ = cands[i]
+                xj, yj, _, hj, _ = cands[j]
+                dx = xj - xi
+                if abs(dx) < bw * 0.14:
+                    continue
+                if not (0.68 <= (hi / max(1.0, hj)) <= 1.47):
+                    continue
+                m = (yj - yi) / dx
+                if abs(m) > 0.78:
+                    continue
+                b = yi - m * xi
+                y_mid = m * (bw * 0.5) + b
+                if not (bh * 0.18 <= y_mid <= bh * 0.82):
+                    continue
+                ref_h = 0.5 * (hi + hj)
+                inliers = [
+                    c
+                    for c in cands
+                    if 0.65 <= (c[3] / ref_h) <= 1.50
+                    and abs(c[1] - (m * c[0] + b)) <= max(ref_h * 0.35, bh * 0.08)
+                ]
+                if len(inliers) >= 4:
+                    xs_in = [c[0] for c in inliers]
+                    span = (max(xs_in) - min(xs_in)) / max(1.0, float(bw))
+                    score = len(inliers) * (0.4 + span)
+                    if score > best_score and span >= 0.34:
+                        best_score = score
+                        best_inliers = inliers
+
+    if len(best_inliers) < 4:
+        return None
+
+    xs = np.array([c[0] for c in best_inliers], dtype=np.float32)
+    ys = np.array([c[1] for c in best_inliers], dtype=np.float32)
+    hs = np.array([c[3] for c in best_inliers], dtype=np.float32)
+    m_fit, b_fit = np.polyfit(xs, ys, 1)
+    slope = float(np.clip(m_fit, -0.75, 0.75))
+    char_h = float(np.percentile(hs, 75))
+    aspect = bw / max(1.0, float(bh))
+
+    if aspect >= 2.9 and abs(slope) < 0.08:
+        abs_dy = min(abs(slope) * bw, bh * 0.22)
+        half_t = 0.5 * (bh - abs_dy)
+        y_left = 0.5 * bh - 0.5 * (slope * bw)
+        y_right = 0.5 * bh + 0.5 * (slope * bw)
+    else:
+        half_t = float(np.clip(char_h * 0.90, bh * 0.25, bh * 0.44))
+        y_left = float(np.clip(slope * 0.0 + b_fit, half_t, bh - half_t))
+        y_right = float(np.clip(slope * float(bw) + b_fit, half_t, bh - half_t))
+
+    tl = [x1, y1 + y_left - half_t]
+    tr = [x2, y1 + y_right - half_t]
+    br = [x2, y1 + y_right + half_t]
+    bl = [x1, y1 + y_left + half_t]
+    quad = np.array([tl, tr, br, bl], dtype=np.float32)
+    return expand_quad(quad, pad_ratio, min_pad_px, img_w, img_h)
+
+
 def estimate_plate_corners(
     image_bgr: np.ndarray,
     bbox: tuple[int, int, int, int],
@@ -238,6 +348,13 @@ def estimate_plate_corners(
     bw, bh = x2 - x1, y2 - y1
     if bw < 12 or bh < 8:
         return padded_bbox_quad(bbox, pad_ratio, min_pad_px, img_w, img_h), "fallback"
+
+    # First try RANSAC collinear character-line perspective quad (handles real angled & straight plates cleanly)
+    char_quad = _estimate_quad_from_character_line(
+        image_bgr, bbox, pad_ratio, min_pad_px
+    )
+    if char_quad is not None:
+        return char_quad, "perspective"
 
     crop_pad_x = max(min_pad_px, int(round(bw * pad_ratio)))
     crop_pad_y = max(min_pad_px, int(round(bh * pad_ratio)))
@@ -335,6 +452,7 @@ def estimate_plate_corners(
         min(top_w, bot_w) < bw * 0.65
         or x_span < bw * 0.72
         or max(left_h, right_h, y_span) < bh * 0.45
+        or min(left_h, right_h) / max(1.0, max(left_h, right_h)) < 0.68
     ):
         return padded_bbox_quad(bbox, pad_ratio, min_pad_px, img_w, img_h), "fallback"
 

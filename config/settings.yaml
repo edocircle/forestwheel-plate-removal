@@ -34,7 +34,7 @@ overlay:
 
 output:
   active_profile: "website"
-  jpeg_quality: 92
+  jpeg_quality: 95
 
 sync:
   rclone_binary: "rclone"
@@ -69,8 +69,8 @@ review_app:
   auth_user_env: "FW_REVIEW_USER"
   auth_pass_env: "FW_REVIEW_PASS"
   decisions_file: "data/review_decisions.json"
-  thumbnail_width: 640
-  low_conf_preview_floor: 0.05
+  thumbnail_width: 1080
+  low_conf_preview_floor: 0.40
 
 
 

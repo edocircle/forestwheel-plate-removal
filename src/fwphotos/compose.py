@@ -203,11 +203,13 @@ def render_apple_frame_studio(
     """
     r_clean = ratio.strip()
     if r_clean == "16:9":
-        canvas_w, canvas_h = 1920, 1080
+        canvas_w, canvas_h = 2560, 1440
     elif r_clean == "9:16":
-        canvas_w, canvas_h = 1080, 1920
+        canvas_w, canvas_h = 1440, 2560
     else:
-        canvas_w, canvas_h = 1080, 1080
+        canvas_w, canvas_h = 2160, 2160
+
+    sc = min(canvas_w, canvas_h) / 1080.0
 
     style = template_style.strip().lower()
     mode = fit_mode.strip().lower()
@@ -219,20 +221,20 @@ def render_apple_frame_studio(
 
     # Determine inner photo viewport and outer surface based on Apple template style
     has_caption_text = bool(car_model.strip() or car_price.strip() or car_specs.strip())
-    caption_h = 116 if (caption_enabled and has_caption_text and style in ("clean_white", "soft_grey", "rounded_card")) else 0
+    caption_h = int(round(116 * sc)) if (caption_enabled and has_caption_text and style in ("clean_white", "soft_grey", "rounded_card")) else 0
 
     if style == "clean_white":
         bg_color = (255, 255, 255)
-        pad = 36
+        pad = int(round(36 * sc))
     elif style == "soft_grey":
         bg_color = (240, 237, 239)
-        pad = 40
+        pad = int(round(40 * sc))
     elif style == "minimal_border":
         bg_color = (252, 248, 251)
-        pad = 24
+        pad = int(round(24 * sc))
     elif style == "rounded_card":
         bg_color = (246, 243, 245)
-        pad = 52
+        pad = int(round(52 * sc))
     else:
         # glass_overlay uses full-bleed canvas
         bg_color = (252, 248, 251)
@@ -261,7 +263,7 @@ def render_apple_frame_studio(
             (box_w, box_h),
             method=Image.Resampling.BILINEAR,
             centering=(0.5, 0.5),
-        ).filter(ImageFilter.GaussianBlur(radius=32))
+        ).filter(ImageFilter.GaussianBlur(radius=int(round(32 * sc))))
         # Slightly brighten/soften the blurred backdrop for Apple studio aesthetic
         soft_overlay = Image.new("RGB", (box_w, box_h), (255, 255, 255))
         viewport_img = Image.blend(blurred_bg, soft_overlay, alpha=0.14)
@@ -277,7 +279,7 @@ def render_apple_frame_studio(
 
     # Apply rounded corners to viewport if style is rounded_card or clean_white/soft_grey
     if style in ("rounded_card", "clean_white", "soft_grey") and pad > 0:
-        radius = 32 if style == "rounded_card" else 20
+        radius = int(round((32 if style == "rounded_card" else 20) * sc))
         mask = Image.new("L", (box_w, box_h), 0)
         mask_draw = ImageDraw.Draw(mask)
         mask_draw.rounded_rectangle([0, 0, box_w - 1, box_h - 1], radius=radius, fill=255)
@@ -289,22 +291,23 @@ def render_apple_frame_studio(
 
     # Style-specific borders and overlays
     if style == "minimal_border":
+        inset = int(round(14 * sc))
         draw.rectangle(
             [pad, pad, canvas_w - 1 - pad, canvas_h - 1 - pad],
             outline=(27, 27, 29, 255),
-            width=3,
+            width=max(3, int(round(3 * sc))),
         )
         draw.rectangle(
-            [pad + 14, pad + 14, canvas_w - 1 - pad - 14, canvas_h - 1 - pad - 14],
+            [pad + inset, pad + inset, canvas_w - 1 - pad - inset, canvas_h - 1 - pad - inset],
             outline=(255, 255, 255, 190),
-            width=2,
+            width=max(2, int(round(2 * sc))),
         )
 
     # Render optional caption (car model, specs, price)
     if caption_enabled and has_caption_text:
-        title_font = _load_font(None, 32)
-        sub_font = _load_font(None, 20)
-        price_font = _load_font(None, 34)
+        title_font = _load_font(None, int(round(32 * sc)))
+        sub_font = _load_font(None, int(round(20 * sc)))
+        price_font = _load_font(None, int(round(34 * sc)))
 
         model_txt = car_model.strip()
         price_txt = car_price.strip()
@@ -312,8 +315,8 @@ def render_apple_frame_studio(
 
         if style in ("glass_overlay", "minimal_border"):
             # Floating frosted glass pill at the bottom of the frame
-            bar_margin = 44
-            bar_h = 112
+            bar_margin = int(round(44 * sc))
+            bar_h = int(round(112 * sc))
             bar_y1 = canvas_h - bar_margin - bar_h
             bar_y2 = canvas_h - bar_margin
             bar_x1 = bar_margin
@@ -321,21 +324,21 @@ def render_apple_frame_studio(
 
             draw.rounded_rectangle(
                 [bar_x1, bar_y1, bar_x2, bar_y2],
-                radius=24,
+                radius=int(round(24 * sc)),
                 fill=(255, 255, 255, 218),
                 outline=(255, 255, 255, 245),
-                width=2,
+                width=max(2, int(round(2 * sc))),
             )
             if model_txt:
                 draw.text(
-                    (bar_x1 + 28, bar_y1 + 22),
+                    (bar_x1 + int(round(28 * sc)), bar_y1 + int(round(22 * sc))),
                     model_txt,
                     fill=(27, 27, 29, 255),
                     font=title_font,
                 )
             if specs_txt:
                 draw.text(
-                    (bar_x1 + 28, bar_y1 + 64),
+                    (bar_x1 + int(round(28 * sc)), bar_y1 + int(round(64 * sc))),
                     specs_txt,
                     fill=(65, 71, 85, 255),
                     font=sub_font,
@@ -343,7 +346,7 @@ def render_apple_frame_studio(
             if price_txt:
                 try:
                     draw.text(
-                        (bar_x2 - 28, bar_y1 + 56),
+                        (bar_x2 - int(round(28 * sc)), bar_y1 + int(round(56 * sc))),
                         price_txt,
                         fill=(0, 88, 188, 255),
                         font=price_font,
@@ -351,24 +354,24 @@ def render_apple_frame_studio(
                     )
                 except ValueError:
                     draw.text(
-                        (bar_x2 - 200, bar_y1 + 36),
+                        (bar_x2 - int(round(200 * sc)), bar_y1 + int(round(36 * sc))),
                         price_txt,
                         fill=(0, 88, 188, 255),
                         font=price_font,
                     )
         else:
             # Clean studio footer below the photo
-            footer_y = box_y2 + 20
+            footer_y = box_y2 + int(round(20 * sc))
             if model_txt:
                 draw.text(
-                    (box_x1 + 8, footer_y),
+                    (box_x1 + int(round(8 * sc)), footer_y),
                     model_txt,
                     fill=(27, 27, 29, 255),
                     font=title_font,
                 )
             if specs_txt:
                 draw.text(
-                    (box_x1 + 8, footer_y + 42),
+                    (box_x1 + int(round(8 * sc)), footer_y + int(round(42 * sc))),
                     specs_txt,
                     fill=(113, 119, 134, 255),
                     font=sub_font,
@@ -376,7 +379,7 @@ def render_apple_frame_studio(
             if price_txt:
                 try:
                     draw.text(
-                        (box_x2 - 8, footer_y + 34),
+                        (box_x2 - int(round(8 * sc)), footer_y + int(round(34 * sc))),
                         price_txt,
                         fill=(0, 88, 188, 255),
                         font=price_font,
@@ -384,31 +387,57 @@ def render_apple_frame_studio(
                     )
                 except ValueError:
                     draw.text(
-                        (box_x2 - 180, footer_y + 16),
+                        (box_x2 - int(round(180 * sc)), footer_y + int(round(16 * sc))),
                         price_txt,
                         fill=(0, 88, 188, 255),
                         font=price_font,
                     )
 
-    # Optional Dealership Brand Logo Watermark in top-right corner of the photo viewport
+    # Optional High-Resolution Dealership Brand Logo Watermark in top-right corner of the photo viewport
     if show_logo_watermark and logo_path is not None and logo_path.exists():
         try:
             with Image.open(logo_path) as logo_raw:
                 logo_rgba = logo_raw.convert("RGBA")
-                max_logo_w = int(canvas_w * 0.14)
-                max_logo_h = int(canvas_h * 0.08)
-                logo_rgba.thumbnail((max_logo_w, max_logo_h), Image.Resampling.LANCZOS)
-                lw, lh = logo_rgba.size
-                margin = 24
-                lx = box_x2 - lw - margin
-                ly = box_y1 + margin
-                # Subtle frosted pill behind the logo for contrast on bright/dark cars
-                draw.rounded_rectangle(
-                    [lx - 10, ly - 8, lx + lw + 10, ly + lh + 8],
-                    radius=14,
-                    fill=(255, 255, 255, 200),
+                # Trim transparent margins so square canvases with empty padding use the full badge resolution
+                alpha_ch = logo_rgba.split()[3]
+                alpha_bbox = alpha_ch.getbbox()
+                if alpha_bbox:
+                    logo_rgba = logo_rgba.crop(alpha_bbox)
+
+                max_logo_w = int(round(min(canvas_w, canvas_h) * 0.165))
+                max_logo_h = int(round(min(canvas_w, canvas_h) * 0.115))
+                logo_resized = ImageOps.contain(
+                    logo_rgba,
+                    (max_logo_w, max_logo_h),
+                    method=Image.Resampling.LANCZOS,
                 )
-                canvas.paste(logo_rgba, (lx, ly), mask=logo_rgba)
+                lw, lh = logo_resized.size
+                margin = int(round(24 * sc))
+                pad_x = int(round(14 * sc))
+                pad_y = int(round(12 * sc))
+                badge_w = lw + 2 * pad_x
+                badge_h = lh + 2 * pad_y
+                bx = box_x2 - badge_w - margin
+                by = box_y1 + margin
+
+                # Render 2x supersampled anti-aliased frosted pill behind the logo
+                ss = 2
+                pill_hi = Image.new("RGBA", (badge_w * ss, badge_h * ss), (0, 0, 0, 0))
+                pill_draw = ImageDraw.Draw(pill_hi)
+                pill_draw.rounded_rectangle(
+                    [0, 0, badge_w * ss - 1, badge_h * ss - 1],
+                    radius=int(round(18 * sc * ss)),
+                    fill=(255, 255, 255, 224),
+                    outline=(255, 255, 255, 250),
+                    width=max(2, int(round(1.5 * sc * ss))),
+                )
+                pill_smooth = pill_hi.resize((badge_w, badge_h), resample=Image.Resampling.LANCZOS)
+                canvas.paste(pill_smooth.convert("RGB"), (bx, by), mask=pill_smooth.split()[3])
+                canvas.paste(
+                    logo_resized.convert("RGB"),
+                    (bx + pad_x, by + pad_y),
+                    mask=logo_resized.split()[3],
+                )
         except Exception:
             pass
 

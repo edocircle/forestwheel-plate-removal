@@ -80,6 +80,65 @@ def scale_bbox_to_original(
     return (ox1, oy1, ox2, oy2)
 
 
+def count_collinear_plate_blobs(
+    image_bgr: np.ndarray, bbox: tuple[int, int, int, int]
+) -> int:
+    """Count collinear character-sized connected components inside bbox (without OCR).
+
+    Used to verify that medium-confidence YOLO candidates actually contain a row of
+    license-plate character strokes rather than interior dashboard switches, grilles,
+    or door sill trim.
+    """
+    x1, y1, x2, y2 = bbox
+    bw, bh = x2 - x1, y2 - y1
+    if bw < 20 or bh < 8:
+        return 0
+
+    roi_bgr = image_bgr[y1:y2, x1:x2]
+    if roi_bgr.size == 0:
+        return 0
+    roi = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+    if float(np.std(roi)) < 12.0:
+        return 0
+
+    scale = 200.0 / max(1, bw)
+    nh = max(28, int(round(bh * scale)))
+    norm = cv2.resize(roi, (200, nh), interpolation=cv2.INTER_AREA)
+    blur = cv2.GaussianBlur(norm, (3, 3), 0)
+
+    best = 0
+    for inv in (False, True):
+        src = (255 - blur) if inv else blur
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, max(11, nh // 2)))
+        tophat = cv2.morphologyEx(src, cv2.MORPH_TOPHAT, kernel)
+        _, th = cv2.threshold(tophat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        num_l, _, stats, centroids = cv2.connectedComponentsWithStats(th)
+        cands: list[tuple[float, float, int]] = []
+        for i in range(1, num_l):
+            _, _, cw, ch, area = stats[i]
+            if 3 <= cw <= 52 and (nh * 0.11) <= ch <= (nh * 0.88) and area >= 16:
+                aspect = ch / max(1.0, float(cw))
+                if 0.6 <= aspect <= 7.0:
+                    cands.append((float(centroids[i][0]), float(centroids[i][1]), int(ch)))
+
+        if len(cands) >= 4:
+            xs = np.array([c[0] for c in cands], dtype=np.float32)
+            ys = np.array([c[1] for c in cands], dtype=np.float32)
+            hs = np.array([c[2] for c in cands], dtype=np.float32)
+            m, b = np.polyfit(xs, ys, 1)
+            res = np.abs(ys - (m * xs + b))
+            med_h = float(np.median(hs))
+            inliers = (res <= nh * 0.20) & (hs >= med_h * 0.55) & (hs <= med_h * 1.8)
+            xs_in = xs[inliers]
+            if len(xs_in) >= 4 and float(xs_in.max() - xs_in.min()) >= 60.0:
+                best = max(best, int(len(xs_in)))
+            else:
+                best = max(best, int(np.sum(inliers)))
+        else:
+            best = max(best, len(cands))
+    return best
+
+
 def ensure_weights(weights_path: Path, weights_url: str | None = None) -> Path:
     """Ensure YOLO model weights exist locally; download from weights_url if missing."""
     if weights_path.exists():
@@ -156,6 +215,8 @@ class PlateDetector:
         )
 
         detections: list[Detection] = []
+        is_textured_photo = float(np.std(resized_bgr)) >= 12.0
+
         for result in results:
             boxes = getattr(result, "boxes", None)
             if boxes is None:
@@ -163,7 +224,8 @@ class PlateDetector:
             xyxy_list = boxes.xyxy.cpu().numpy().tolist()
             conf_list = boxes.conf.cpu().numpy().tolist()
             for coords, conf in zip(xyxy_list, conf_list):
-                if float(conf) < threshold:
+                conf_f = float(conf)
+                if conf_f < threshold:
                     continue
                 scaled_box = scale_bbox_to_original(
                     (coords[0], coords[1], coords[2], coords[3]),
@@ -171,9 +233,54 @@ class PlateDetector:
                     orig_w,
                     orig_h,
                 )
+                # Filter out medium-confidence false positives on non-plate car parts
+                # (steering wheel switches, door sills, engine covers, mirrors)
+                if is_textured_photo and conf_f < 0.70:
+                    blobs = count_collinear_plate_blobs(image_bgr, scaled_box)
+                    if blobs < 4:
+                        continue
+
                 detections.append(
-                    Detection(bbox=scaled_box, confidence=round(float(conf), 4))
+                    Detection(bbox=scaled_box, confidence=round(conf_f, 4))
                 )
+
+        # Rescue angled Singapore black-background white-character plates where standard
+        # white-plate YOLO confidence was below threshold, verified by inverted luminance + >=5 character blobs
+        if not detections and is_textured_photo and threshold >= 0.35:
+            gray_res = cv2.cvtColor(resized_bgr, cv2.COLOR_BGR2GRAY)
+            inv_res = cv2.cvtColor(255 - gray_res, cv2.COLOR_GRAY2BGR)
+            inv_results = model.predict(
+                source=inv_res,
+                conf=max(threshold, 0.50),
+                device=self.device,
+                verbose=False,
+            )
+            for result in inv_results:
+                boxes = getattr(result, "boxes", None)
+                if boxes is None:
+                    continue
+                xyxy_list = boxes.xyxy.cpu().numpy().tolist()
+                conf_list = boxes.conf.cpu().numpy().tolist()
+                for coords, conf in zip(xyxy_list, conf_list):
+                    conf_f = float(conf)
+                    if conf_f < max(threshold, 0.50):
+                        continue
+                    scaled_box = scale_bbox_to_original(
+                        (coords[0], coords[1], coords[2], coords[3]),
+                        scale,
+                        orig_w,
+                        orig_h,
+                    )
+                    bx1, by1, bx2, by2 = scaled_box
+                    # Must not touch outer frame border and must have >= 5 collinear plate blobs
+                    if bx1 <= 8 or by1 <= 8 or bx2 >= orig_w - 8 or by2 >= orig_h - 8:
+                        continue
+                    if (bx2 - bx1) > orig_w * 0.36:
+                        continue
+                    if count_collinear_plate_blobs(image_bgr, scaled_box) >= 5:
+                        detections.append(
+                            Detection(bbox=scaled_box, confidence=round(conf_f, 4))
+                        )
 
         detections.sort(key=lambda d: d.confidence, reverse=True)
         return detections

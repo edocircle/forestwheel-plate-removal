@@ -100,3 +100,63 @@ def test_steep_three_quarter_tilted_plate_follows_tilt_angle() -> None:
     assert (tr[1] - tl[1]) > 35.0
     assert (br[1] - bl[1]) > 35.0
 
+
+def test_dark_plate_with_collinear_characters_estimates_tidy_parallel_quad() -> None:
+    """Dark plate on a dark bumper (no visible plate border) estimates a tidy parallel quad from character blobs."""
+    from fwphotos.detect import count_collinear_plate_blobs
+
+    # Dark bumper and dark plate background (nearly identical luminance so contour thresholding merges them)
+    img = np.full((420, 640, 3), (28, 28, 30), dtype=np.uint8)
+    # Draw 6 angled white character-sized blocks along a 12-degree tilted line
+    for i in range(6):
+        cx = 200 + i * 32
+        cy = int(190 + i * 6.5)
+        cv2.rectangle(img, (cx - 8, cy - 16), (cx + 8, cy + 16), (235, 235, 235), -1)
+
+    bbox = (175, 160, 405, 255)
+    assert count_collinear_plate_blobs(img, bbox) >= 5
+
+    # Uniform textureless interior region has 0 collinear blobs
+    assert count_collinear_plate_blobs(img, (10, 10, 150, 80)) == 0
+
+    settings = load_settings(Path("config/settings.yaml"))
+    est_quad, mode = estimate_plate_corners(img, bbox, settings["overlay"])
+    assert mode == "perspective"
+    tl, tr, br, bl = est_quad
+    left_h = float(np.linalg.norm(bl - tl))
+    right_h = float(np.linalg.norm(br - tr))
+    # Left and right edge heights must be balanced (tidy parallel quad, not a wedge)
+    assert min(left_h, right_h) / max(left_h, right_h) >= 0.85
+    # Must follow the downward-right tilt of the characters
+    assert (tr[1] - tl[1]) > 20.0
+
+
+def test_high_dpi_apple_frame_studio_and_crisp_logo_badge(tmp_path: Path) -> None:
+    """render_apple_frame_studio outputs 2160x2160 for 1:1 and trims transparent logo margins for high-res badge."""
+    from PIL import Image
+    from fwphotos.compose import render_apple_frame_studio
+
+    sample_bgr = np.full((800, 1200, 3), (90, 110, 130), dtype=np.uint8)
+    # Create a 1200x1200 RGBA logo with large transparent margins and a bright red center emblem
+    logo_rgba = Image.new("RGBA", (1200, 1200), (0, 0, 0, 0))
+    emblem = Image.new("RGBA", (600, 600), (220, 20, 40, 255))
+    logo_rgba.paste(emblem, (300, 300))
+    logo_file = tmp_path / "logo_padded.png"
+    logo_rgba.save(logo_file, format="PNG")
+
+    framed = render_apple_frame_studio(
+        sample_bgr,
+        ratio="1:1",
+        fit_mode="fit",
+        template_style="clean_white",
+        logo_path=logo_file,
+        show_logo_watermark=True,
+    )
+    assert framed.size == (2160, 2160)
+    # Top-right badge zone should contain a substantial area of crisp red emblem pixels
+    arr = np.array(framed)
+    top_right = arr[0:380, 1700:2160]
+    red_pixels = int(np.sum((top_right[:, :, 0] > 180) & (top_right[:, :, 1] < 60)))
+    assert red_pixels > 8000
+
+

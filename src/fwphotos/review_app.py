@@ -197,15 +197,15 @@ def _render_composed_image(
     return compose_template(processed_bgr, template_cfg, profile_name=profile_name)
 
 
-def _pil_to_jpeg_bytes(pil_img: Image.Image, max_width: int = 0, quality: int = 90) -> bytes:
-    """Optionally resize PIL image and encode as JPEG bytes."""
+def _pil_to_jpeg_bytes(pil_img: Image.Image, max_width: int = 0, quality: int = 92) -> bytes:
+    """Optionally resize PIL image and encode as high-chroma (4:4:4) JPEG bytes."""
     img = pil_img.convert("RGB")
     if max_width > 0 and img.width > max_width:
         ratio = max_width / float(img.width)
         new_h = max(1, int(round(img.height * ratio)))
         img = img.resize((max_width, new_h), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=quality)
+    img.save(buf, format="JPEG", quality=quality, subsampling=0)
     return buf.getvalue()
 
 
@@ -482,6 +482,8 @@ def create_review_app(
         if cache_file.exists():
             return load_image_bgr(cache_file)
 
+        decisions = _load_json_dict(decisions_file)
+
         # Otherwise check if raw photo exists in inbox_dir/<car_id> or data/test_photos
         search_dirs = [
             inbox_dir / car_id,
@@ -494,7 +496,13 @@ def create_review_app(
                 cand = sdir / f"{stem}{ext}"
                 if cand.exists():
                     bgr = load_image_bgr(cand)
-                    dets = _get_detector().detect_array(bgr, min_conf=low_conf_floor)
+                    dec_entry = decisions.get(f"{car_id}/{cand.name}", {})
+                    if dec_entry.get("plate_cover_removed"):
+                        cache_file.parent.mkdir(parents=True, exist_ok=True)
+                        cv2.imwrite(str(cache_file), bgr)
+                        return bgr
+
+                    dets = _get_detector().detect_array(bgr)
                     if dets:
                         ov = apply_plate_overlays(bgr, dets, settings, overlay_bgra)
                         cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -502,6 +510,27 @@ def create_review_app(
                         return ov.image_bgr
                     return bgr
         return None
+
+    def _re_render_all_output_photos(ratio_override: str | None = None) -> int:
+        """Re-render all existing output photos with the active Frame config and Brand Logo settings."""
+        out_tree = _discover_folder_tree(output_dir, is_review=False)
+        updated_files = 0
+        for cid, items in out_tree.items():
+            target_d = output_dir if cid == "_root" else (output_dir / cid)
+            for item in items:
+                fname = item["filename"]
+                stem = Path(fname).stem
+                covered_bgr = _find_plate_covered_base(cid, stem)
+                if covered_bgr is not None:
+                    framed_pil = _render_with_active_frame_config(
+                        covered_bgr, car_id=cid, ratio_override=ratio_override
+                    )
+                    out_p = target_d / fname
+                    framed_pil.convert("RGB").save(
+                        out_p, format="JPEG", quality=jpeg_quality, subsampling=0
+                    )
+                    updated_files += 1
+        return updated_files
 
     @app.get("/", response_class=HTMLResponse)
     def index(_user: str = Depends(verify_auth)) -> HTMLResponse:
@@ -547,6 +576,7 @@ def create_review_app(
         raw = _load_json_dict(user_profile_file)
         cur = _get_user_profile()
 
+        prev_wm = cur["show_logo_watermark"]
         raw["dealer_name"] = str(payload.get("dealer_name", cur["dealer_name"])).strip() or "Forest Wheel"
         raw["dealer_tagline"] = str(payload.get("dealer_tagline", cur["dealer_tagline"])).strip()
         raw["default_specs"] = str(payload.get("default_specs", cur["default_specs"])).strip()
@@ -554,6 +584,9 @@ def create_review_app(
         raw["show_logo_watermark"] = bool(payload.get("show_logo_watermark", cur["show_logo_watermark"]))
         raw["updated_at"] = datetime.now(timezone.utc).isoformat()
         _save_json_dict(user_profile_file, raw)
+
+        if raw["show_logo_watermark"] != prev_wm:
+            _re_render_all_output_photos()
 
         return JSONResponse(content={"ok": True, "profile": _get_user_profile()})
 
@@ -577,6 +610,9 @@ def create_review_app(
                 status_code=400, detail=f"Invalid image file for brand logo: {exc}"
             ) from exc
 
+        if _get_user_profile().get("show_logo_watermark"):
+            _re_render_all_output_photos()
+
         return JSONResponse(
             content={
                 "ok": True,
@@ -591,6 +627,8 @@ def create_review_app(
         """Reset the dealership brand logo back to the default assets/logo.png."""
         if custom_logo_file.exists():
             custom_logo_file.unlink(missing_ok=True)
+        if _get_user_profile().get("show_logo_watermark"):
+            _re_render_all_output_photos()
         return JSONResponse(
             content={
                 "ok": True,
@@ -888,7 +926,9 @@ def create_review_app(
                         ov.image_bgr, car_id=clean_cid, ratio_override=effective_ratio
                     )
                     out_file = car_out / f"{src_p.stem}.jpg"
-                    framed_pil.convert("RGB").save(out_file, format="JPEG", quality=jpeg_quality)
+                    framed_pil.convert("RGB").save(
+                        out_file, format="JPEG", quality=jpeg_quality, subsampling=0
+                    )
 
         out_count = sum(1 for r in records if r.destination == "output")
         rev_count = sum(1 for r in records if r.destination == "review")
@@ -1000,7 +1040,7 @@ def create_review_app(
         """Serve authenticated 'After' framed preview of a review image using the pre-selected Frame config."""
         img_path = _resolve_child_file(review_dir, car_id, filename)
         image_bgr = load_image_bgr(img_path)
-        dets = _get_detector().detect_array(image_bgr, min_conf=low_conf_floor)
+        dets = _get_detector().detect_array(image_bgr)
         if dets:
             processed_bgr = apply_plate_overlays(image_bgr, dets, settings, overlay_bgra).image_bgr
         else:
@@ -1113,7 +1153,7 @@ def create_review_app(
         )
         if sample_candidates:
             sample_bgr = load_image_bgr(sample_candidates[0])
-            dets = _get_detector().detect_array(sample_bgr, min_conf=low_conf_floor)
+            dets = _get_detector().detect_array(sample_bgr)
             if dets:
                 sample_bgr = apply_plate_overlays(sample_bgr, dets, settings, overlay_bgra).image_bgr
         else:
@@ -1151,7 +1191,7 @@ def create_review_app(
                 image_bgr, overlay_bgra, pts, feather_px=feather_px
             )
         else:
-            dets = _get_detector().detect_array(image_bgr, min_conf=low_conf_floor)
+            dets = _get_detector().detect_array(image_bgr)
             if dets:
                 processed_bgr = apply_plate_overlays(image_bgr, dets, settings, overlay_bgra).image_bgr
             else:
@@ -1170,7 +1210,9 @@ def create_review_app(
         target_dir = output_dir if car_id == "_root" else (output_dir / car_id)
         target_dir.mkdir(parents=True, exist_ok=True)
         out_path = target_dir / f"{img_path.stem}.jpg"
-        composed_pil.convert("RGB").save(out_path, format="JPEG", quality=jpeg_quality)
+        composed_pil.convert("RGB").save(
+            out_path, format="JPEG", quality=jpeg_quality, subsampling=0
+        )
 
         img_path.unlink()
 
@@ -1289,7 +1331,7 @@ def create_review_app(
                 cand = target_d / safe_name
                 if cand.is_file():
                     bgr = load_image_bgr(cand)
-                    dets = _get_detector().detect_array(bgr, min_conf=low_conf_floor)
+                    dets = _get_detector().detect_array(bgr)
                     if dets:
                         covered_bgr = apply_plate_overlays(bgr, dets, settings, overlay_bgra).image_bgr
                     else:
@@ -1547,7 +1589,7 @@ def create_review_app(
                 cand = target_d / safe_name
                 if cand.is_file():
                     bgr = load_image_bgr(cand)
-                    dets = _get_detector().detect_array(bgr, min_conf=low_conf_floor)
+                    dets = _get_detector().detect_array(bgr)
                     if dets:
                         return apply_plate_overlays(bgr, dets, settings, overlay_bgra).image_bgr
                     return bgr
@@ -1569,7 +1611,7 @@ def create_review_app(
         )
         if sample_candidates:
             sample_bgr = load_image_bgr(sample_candidates[0])
-            dets = _get_detector().detect_array(sample_bgr, min_conf=low_conf_floor)
+            dets = _get_detector().detect_array(sample_bgr)
             if dets:
                 return apply_plate_overlays(sample_bgr, dets, settings, overlay_bgra).image_bgr
             return sample_bgr
@@ -1588,7 +1630,7 @@ def create_review_app(
             raise HTTPException(status_code=404, detail="Vehicle photo not found.")
 
         img_h, img_w = orig_bgr.shape[:2]
-        dets = _get_detector().detect_array(orig_bgr, min_conf=low_conf_floor)
+        dets = _get_detector().detect_array(orig_bgr)
         if dets:
             best = max(dets, key=lambda d: d.confidence)
             quad_px, mode = estimate_plate_corners(orig_bgr, best.bbox, settings.get("overlay", {}))
@@ -1597,7 +1639,7 @@ def create_review_app(
                 for pt in quad_px
             ]
         else:
-            # Default centered lower-bumper rectangle so user can drag it onto the plate
+            # Default centered lower-bumper rectangle so user can drag it onto the plate if needed
             quad_pct = [[36.0, 62.0], [64.0, 62.0], [64.0, 74.0], [36.0, 74.0]]
             mode = "manual_default"
 
@@ -1607,6 +1649,7 @@ def create_review_app(
                 "car_id": car_id,
                 "filename": filename,
                 "mode": mode,
+                "has_plate": bool(dets),
                 "quad_pct": quad_pct,
             }
         )
@@ -1665,7 +1708,7 @@ def create_review_app(
             logo_path=_get_active_logo_path(),
             show_logo_watermark=prof["show_logo_watermark"],
         )
-        max_w = 0 if download else 1080
+        max_w = 0 if download else 1600
         jpeg_bytes = _pil_to_jpeg_bytes(rendered_pil, max_width=max_w, quality=jpeg_quality)
         headers = {"Cache-Control": "private, no-store"}
         if download:
@@ -1769,7 +1812,9 @@ def create_review_app(
                 out_name = f"{stem}_frame_{template_style}_{r_slug}.jpg"
 
             out_path = target_dir / out_name
-            rendered_pil.convert("RGB").save(out_path, format="JPEG", quality=jpeg_quality)
+            rendered_pil.convert("RGB").save(
+                out_path, format="JPEG", quality=jpeg_quality, subsampling=0
+            )
 
             # Update cached base image (either with plate cover or with plate cover removed)
             cache_f = output_dir / "_covered_cache" / safe_car / f"{Path(out_name).stem}.jpg"
