@@ -149,10 +149,6 @@ tailwind.config = {
 
     <!-- Right Quick Actions -->
     <div class="flex items-center gap-2.5">
-      <button onclick="runDemoBatch()" id="btn-demo-load" class="px-3.5 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-xs font-semibold text-on-surface-variant transition-all flex items-center gap-1.5" title="Load sample vehicles from test_photos">
-        <span class="material-symbols-outlined text-[16px] text-primary">auto_awesome</span>
-        <span class="hidden sm:inline">Load Sample Cars</span>
-      </button>
       <button type="button" onclick="switchTab('profile')" id="header-user-pill"
               class="px-3 py-1.5 rounded-full bg-white hover:bg-surface-container border border-outline-variant/30 text-xs font-semibold text-on-surface shadow-sm transition-all flex items-center gap-1.5"
               title="Dealership Profile &amp; Security Settings">
@@ -1371,7 +1367,7 @@ tailwind.config = {
     if (uploadFilesQueue.length === 0) {
       grid.innerHTML = `
         <div class="col-span-full apple-card-white rounded-2xl p-6 text-center text-xs text-on-surface-variant">
-          No photos queued yet. Click <strong>Upload photos</strong> above or load sample cars to test.
+          No photos queued yet. Click <strong>Upload photos</strong> above to select car photos.
         </div>`;
       return;
     }
@@ -1589,10 +1585,10 @@ tailwind.config = {
           </div>
           <div>
             <h3 class="text-lg font-bold text-on-surface">No vehicles found</h3>
-            <p class="text-xs sm:text-sm text-on-surface-variant mt-1">Upload car photos in the Upload tab or load sample cars to populate the gallery.</p>
+            <p class="text-xs sm:text-sm text-on-surface-variant mt-1">Upload car photos in the Upload tab to populate the gallery.</p>
           </div>
-          <button type="button" onclick="runDemoBatch('SXX-1234-A')" class="px-5 py-2.5 rounded-full bg-primary text-white text-xs font-semibold shadow-sm">
-            Load Sample Showroom Batch
+          <button type="button" onclick="switchTab('upload')" class="px-5 py-2.5 rounded-full bg-primary text-white text-xs font-semibold shadow-sm">
+            Go to Upload
           </button>
         </div>`;
       return;
