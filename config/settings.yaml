@@ -66,6 +66,7 @@ sync:
 review_app:
   host: "127.0.0.1"
   port: 8000
+  require_auth: false
   auth_user_env: "FW_REVIEW_USER"
   auth_pass_env: "FW_REVIEW_PASS"
   decisions_file: "data/review_decisions.json"

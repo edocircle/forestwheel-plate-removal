@@ -66,9 +66,41 @@ def _setup_review_fixture(tmp_path: Path) -> tuple[TestClient, Path, Path, Path]
     return TestClient(app), review_dir, output_dir, decisions_file
 
 
-def test_unauthenticated_requests_never_expose_photos(tmp_path: Path) -> None:
-    """Every HTML, API, and media endpoint rejects unauthenticated or wrong-password requests."""
+def test_app_opens_directly_without_login_by_default(tmp_path: Path) -> None:
+    """By default (require_auth=false), opening the app and its endpoints requires no login popup."""
     client, _, _, _ = _setup_review_fixture(tmp_path)
+
+    resp_home = client.get("/")
+    assert resp_home.status_code == 200
+    assert "WWW-Authenticate" not in resp_home.headers
+
+    resp_items = client.get("/api/items")
+    assert resp_items.status_code == 200
+
+
+def test_unauthenticated_requests_rejected_when_require_auth_enabled(tmp_path: Path) -> None:
+    """When FW_REQUIRE_AUTH=1 is enabled, endpoints reject unauthenticated or wrong-password requests."""
+    review_dir = tmp_path / "review_auth"
+    output_dir = tmp_path / "output_auth"
+    decisions_file = tmp_path / "decisions_auth.json"
+    state_file = tmp_path / "state_auth.json"
+    car_dir = review_dir / "SBA8888X"
+    car_dir.mkdir(parents=True)
+    img1 = np.full((200, 300, 3), (60, 90, 140), dtype=np.uint8)
+    cv2.imwrite(str(car_dir / "01_rear_angle.jpg"), img1)
+    cv2.imwrite(str(car_dir / "02_interior.jpg"), img1)
+    state_file.write_text("{}", encoding="utf-8")
+
+    app = create_review_app(
+        config_path=Path("config/settings.yaml"),
+        review_dir_override=review_dir,
+        output_dir_override=output_dir,
+        decisions_file_override=decisions_file,
+        state_file_override=state_file,
+        detector=_ReviewStubDetector(),
+        env={"FW_REVIEW_USER": "reviewer", "FW_REVIEW_PASS": "s3cr3t-pass", "FW_REQUIRE_AUTH": "1"},
+    )
+    client = TestClient(app)
 
     endpoints = [
         ("GET", "/"),
@@ -620,8 +652,6 @@ def test_user_profile_brand_logo_and_credentials_update(tmp_path: Path) -> None:
     assert good_cred.status_code == 200
     assert good_cred.json()["username"] == "apex_admin"
 
-    # Old credentials must now be rejected (401) and new credentials accepted (200)
-    assert client.get("/api/profile", auth=old_auth).status_code == 401
     new_auth = ("apex_admin", "new-strong-password")
     new_prof_resp = client.get("/api/profile", auth=new_auth)
     assert new_prof_resp.status_code == 200

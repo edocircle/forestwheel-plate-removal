@@ -385,11 +385,19 @@ def create_review_app(
     def verify_auth(
         credentials: HTTPBasicCredentials | None = Depends(security),
     ) -> str:
-        """Enforce HTTP Basic Auth on every endpoint; never expose photos unauthenticated."""
+        """Return active user directly by default (no login popup), or enforce Basic Auth if require_auth is enabled."""
         environ = os.environ if env is None else env
         expected_user = environ.get(user_env_key, "")
         expected_pass = environ.get(pass_env_key, "")
         raw_prof = _load_json_dict(user_profile_file)
+        active_username = str(raw_prof.get("username") or expected_user or "admin")
+
+        require_auth = bool(app_cfg.get("require_auth", False)) or (
+            environ.get("FW_REQUIRE_AUTH", "").strip().lower() in ("1", "true", "yes")
+        )
+        if not require_auth:
+            return active_username
+
         has_saved_creds = bool(raw_prof.get("password_hash") and raw_prof.get("password_salt"))
 
         if not has_saved_creds and (not expected_user or not expected_pass):
@@ -405,7 +413,6 @@ def create_review_app(
                 headers={"WWW-Authenticate": 'Basic realm="Forest Wheel Review"'},
             )
 
-        active_username = str(raw_prof.get("username") or expected_user)
         user_ok = secrets.compare_digest(
             credentials.username.encode("utf-8"), active_username.encode("utf-8")
         )
