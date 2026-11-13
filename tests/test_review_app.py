@@ -712,16 +712,48 @@ def test_profile_signup_signin_google_and_password_change_without_username(tmp_p
     assert good_login.status_code == 200
     assert good_login.json()["profile"]["is_logged_in"] is True
 
-    # 5. Connect / Sign in with Google email logon
-    google_resp = client.post(
+    # 5. Link the signed-in email account with a Google email (auth_provider becomes 'both')
+    link_resp = client.post(
         "/api/profile/google-login",
-        json={"email": "owner@gmail.com"},
+        json={"email": "dealer.google@gmail.com", "link_account": True},
     )
-    assert google_resp.status_code == 200
-    g_prof = google_resp.json()["profile"]
-    assert g_prof["is_logged_in"] is True
-    assert g_prof["email"] == "owner@gmail.com"
-    assert g_prof["auth_provider"] == "google"
+    assert link_resp.status_code == 200
+    l_prof = link_resp.json()["profile"]
+    assert l_prof["is_logged_in"] is True
+    assert l_prof["email"] == "dealer@forestwheel.com"
+    assert l_prof["google_email"] == "dealer.google@gmail.com"
+    assert l_prof["google_linked"] is True
+    assert l_prof["auth_provider"] == "both"
+
+    # 6. Check SQLite sessions & security audit log
+    sec_resp = client.get("/api/profile/security")
+    assert sec_resp.status_code == 200
+    sec_data = sec_resp.json()
+    assert len(sec_data["sessions"]) >= 1
+    assert any(ev["event_type"] == "google_account_linked" for ev in sec_data["audit_logs"])
+
+    # 7. Unlink Google account (allowed since password is set)
+    unlink_resp = client.post("/api/profile/google-unlink")
+    assert unlink_resp.status_code == 200
+    assert unlink_resp.json()["profile"]["google_linked"] is False
+    assert unlink_resp.json()["profile"]["auth_provider"] == "email"
+
+    # 8. Configure Google OAuth 2.0 Client ID and verify /api/auth/google/start redirects to accounts.google.com
+    oauth_cfg_resp = client.post(
+        "/api/profile/oauth-config",
+        json={
+            "google_client_id": "123456-test.apps.googleusercontent.com",
+            "google_client_secret": "GOCSPX-testsecret",
+        },
+    )
+    assert oauth_cfg_resp.status_code == 200
+    assert oauth_cfg_resp.json()["profile"]["google_oauth_configured"] is True
+
+    redir_resp = client.get("/api/auth/google/start?mode=login", follow_redirects=False)
+    assert redir_resp.status_code == 302
+    assert "accounts.google.com/o/oauth2/v2/auth" in redir_resp.headers["location"]
+    assert "123456-test.apps.googleusercontent.com" in redir_resp.headers["location"]
+
 
 
 

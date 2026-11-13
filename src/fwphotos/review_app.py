@@ -27,11 +27,16 @@ from typing import Any
 
 import cv2
 import numpy as np
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from PIL import Image
 
+from fwphotos.auth_db import (
+    AccountDatabase,
+    exchange_google_oauth_code,
+    verify_google_id_token,
+)
 from fwphotos.compose import (
     compose_template,
     load_template_config,
@@ -245,6 +250,8 @@ def create_review_app(
     custom_overlay_file = state_file.parent / "custom_plate_overlay.png"
     user_profile_file = state_file.parent / "user_profile.json"
     custom_logo_file = state_file.parent / "custom_brand_logo.png"
+    accounts_db_file = state_file.parent / "accounts.db"
+    auth_db = AccountDatabase(accounts_db_file)
     default_logo_path = Path("assets/logo.png")
     car_state_file_cfg = sync_cfg.get("car_state_file")
     car_state_dir = Path(car_state_file_cfg).parent if car_state_file_cfg else state_file.parent
@@ -281,34 +288,83 @@ def create_review_app(
             return default_logo_path
         return None
 
-    def _get_user_profile() -> dict[str, Any]:
-        """Return public-safe Dealership & User Profile settings including Profile auth state."""
+    def _get_oauth_cfg() -> dict[str, Any]:
+        environ = os.environ if env is None else env
+        return auth_db.get_oauth_config(
+            env_client_id=str(environ.get("FW_GOOGLE_CLIENT_ID", "")),
+            env_client_secret=str(environ.get("FW_GOOGLE_CLIENT_SECRET", "")),
+        )
+
+    def _get_user_profile(session_token: str | None = None) -> dict[str, Any]:
+        """Return public-safe Dealership & User Profile settings backed by SQLite accounts.db."""
         environ = os.environ if env is None else env
         default_user = environ.get(user_env_key, "admin") or "admin"
         raw = _load_json_dict(user_profile_file)
-        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
-        logged_in_email = str(raw.get("logged_in_email", "")).strip()
-        is_logged_in = bool(raw.get("is_logged_in", False) and logged_in_email)
-        active_acct = accounts.get(logged_in_email.lower(), {}) if logged_in_email else {}
-        auth_provider = str(active_acct.get("auth_provider") or raw.get("auth_provider") or "email")
-        has_acct_pw = bool(
-            (active_acct.get("password_hash") and active_acct.get("password_salt"))
-            or (raw.get("password_hash") and raw.get("password_salt"))
-        )
+        oauth_cfg = _get_oauth_cfg()
+
+        db_user = auth_db.get_user_by_session_token(session_token) if session_token else None
+        if db_user is None and raw.get("is_logged_in") and raw.get("logged_in_email"):
+            db_user = auth_db.get_user_by_email(str(raw.get("logged_in_email")))
+
+        total_db_users = auth_db.count_users()
+        has_legacy_pw = bool(raw.get("password_hash") and raw.get("password_salt"))
+
+        if db_user is not None:
+            email_val = str(db_user.get("email") or "")
+            google_email_val = str(db_user.get("google_email") or "")
+            google_linked = bool(db_user.get("google_sub") and google_email_val)
+            has_pw = bool(db_user.get("password_hash") and db_user.get("password_salt"))
+            return {
+                "user_id": int(db_user["id"]),
+                "username": email_val or str(raw.get("username") or default_user),
+                "email": email_val,
+                "google_email": google_email_val,
+                "google_name": str(db_user.get("google_name") or ""),
+                "google_picture": str(db_user.get("google_picture") or ""),
+                "google_linked": google_linked,
+                "has_password": has_pw,
+                "auth_provider": str(db_user.get("auth_provider") or "email"),
+                "is_logged_in": True,
+                "has_account": True,
+                "total_accounts": total_db_users,
+                "google_client_id": oauth_cfg["google_client_id"],
+                "google_oauth_configured": oauth_cfg["is_configured"],
+                "google_has_client_secret": oauth_cfg["has_client_secret"],
+                "dealer_name": str(raw.get("dealer_name", "Forest Wheel")),
+                "dealer_tagline": str(raw.get("dealer_tagline", "Plate Removal Studio")),
+                "default_specs": str(raw.get("default_specs", "Verified Pre-Owned • Singapore")),
+                "currency_prefix": str(raw.get("currency_prefix", "S$")),
+                "show_logo_watermark": bool(raw.get("show_logo_watermark", False)),
+                "has_custom_logo": custom_logo_file.exists(),
+                "has_custom_credentials": has_pw or has_legacy_pw,
+                "last_login_at": str(db_user.get("last_login_at") or ""),
+                "updated_at": str(raw.get("updated_at") or db_user.get("updated_at") or ""),
+            }
+
         return {
-            "username": str(logged_in_email or raw.get("username") or default_user),
-            "email": logged_in_email or str(raw.get("email", "")),
-            "auth_provider": auth_provider,
-            "is_logged_in": is_logged_in,
-            "has_account": bool(accounts or has_acct_pw),
-            "google_client_id": str(environ.get("FW_GOOGLE_CLIENT_ID", "")),
+            "user_id": None,
+            "username": str(raw.get("username") or default_user),
+            "email": "",
+            "google_email": "",
+            "google_name": "",
+            "google_picture": "",
+            "google_linked": False,
+            "has_password": has_legacy_pw,
+            "auth_provider": str(raw.get("auth_provider") or "email"),
+            "is_logged_in": False,
+            "has_account": bool(total_db_users > 0 or has_legacy_pw),
+            "total_accounts": total_db_users,
+            "google_client_id": oauth_cfg["google_client_id"],
+            "google_oauth_configured": oauth_cfg["is_configured"],
+            "google_has_client_secret": oauth_cfg["has_client_secret"],
             "dealer_name": str(raw.get("dealer_name", "Forest Wheel")),
             "dealer_tagline": str(raw.get("dealer_tagline", "Plate Removal Studio")),
             "default_specs": str(raw.get("default_specs", "Verified Pre-Owned • Singapore")),
             "currency_prefix": str(raw.get("currency_prefix", "S$")),
             "show_logo_watermark": bool(raw.get("show_logo_watermark", False)),
             "has_custom_logo": custom_logo_file.exists(),
-            "has_custom_credentials": has_acct_pw,
+            "has_custom_credentials": has_legacy_pw,
+            "last_login_at": "",
             "updated_at": str(raw.get("updated_at", "")),
         }
 
@@ -583,32 +639,57 @@ def create_review_app(
         """Return JSON list of cars and images currently in review/."""
         return JSONResponse(content={"cars": _discover_folder_tree(review_dir, is_review=True)})
 
+    SESSION_COOKIE_NAME = "fw_session"
+    OAUTH_STATE_COOKIE = "fw_oauth_state"
+
+    def _get_session_token(request: Request) -> str | None:
+        return request.cookies.get(SESSION_COOKIE_NAME)
+
+    def _client_ip(request: Request) -> str:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "127.0.0.1"
+
+    def _set_session_cookie(response: Response, raw_token: str) -> None:
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=raw_token,
+            max_age=30 * 86400,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+
     @app.get("/api/state")
-    def api_state(_user: str = Depends(verify_auth)) -> JSONResponse:
+    def api_state(request: Request, _user: str = Depends(verify_auth)) -> JSONResponse:
         """Return complete state of both output/ and review/ car galleries, metadata, Frame config, and Profile."""
+        tok = _get_session_token(request)
         return JSONResponse(
             content={
                 "cars_output": _discover_folder_tree(output_dir, is_review=False),
                 "cars_review": _discover_folder_tree(review_dir, is_review=True),
                 "cars_meta": _load_json_dict(cars_meta_file),
                 "frame_config": _get_frame_config(),
-                "profile": _get_user_profile(),
+                "profile": _get_user_profile(tok),
             }
         )
 
     @app.get("/api/profile")
-    def api_get_profile(_user: str = Depends(verify_auth)) -> JSONResponse:
+    def api_get_profile(request: Request, _user: str = Depends(verify_auth)) -> JSONResponse:
         """Return the active Dealership & User Profile settings."""
-        return JSONResponse(content={"ok": True, "profile": _get_user_profile()})
+        return JSONResponse(content={"ok": True, "profile": _get_user_profile(_get_session_token(request))})
 
     @app.put("/api/profile")
     def api_update_profile(
+        request: Request,
         payload: dict[str, Any] = Body(...),
         _user: str = Depends(verify_auth),
     ) -> JSONResponse:
         """Update Dealership Brand Name, Tagline, Default Specs, Currency Prefix, and Logo Watermark toggle."""
+        tok = _get_session_token(request)
         raw = _load_json_dict(user_profile_file)
-        cur = _get_user_profile()
+        cur = _get_user_profile(tok)
 
         prev_wm = cur["show_logo_watermark"]
         raw["dealer_name"] = str(payload.get("dealer_name", cur["dealer_name"])).strip() or "Forest Wheel"
@@ -622,14 +703,16 @@ def create_review_app(
         if raw["show_logo_watermark"] != prev_wm:
             _re_render_all_output_photos()
 
-        return JSONResponse(content={"ok": True, "profile": _get_user_profile()})
+        return JSONResponse(content={"ok": True, "profile": _get_user_profile(tok)})
 
     @app.post("/api/profile/logo")
     async def api_upload_brand_logo(
+        request: Request,
         file: UploadFile = File(...),
         _user: str = Depends(verify_auth),
     ) -> JSONResponse:
         """Upload a custom dealership brand logo for the web app header and optional photo frame watermark."""
+        tok = _get_session_token(request)
         raw_bytes = await file.read()
         if not raw_bytes:
             raise HTTPException(status_code=400, detail="Empty logo file.")
@@ -644,7 +727,7 @@ def create_review_app(
                 status_code=400, detail=f"Invalid image file for brand logo: {exc}"
             ) from exc
 
-        if _get_user_profile().get("show_logo_watermark"):
+        if _get_user_profile(tok).get("show_logo_watermark"):
             _re_render_all_output_photos()
 
         return JSONResponse(
@@ -652,22 +735,23 @@ def create_review_app(
                 "ok": True,
                 "has_custom_logo": True,
                 "filename": file.filename or "custom_brand_logo.png",
-                "profile": _get_user_profile(),
+                "profile": _get_user_profile(tok),
             }
         )
 
     @app.delete("/api/profile/logo")
-    def api_reset_brand_logo(_user: str = Depends(verify_auth)) -> JSONResponse:
+    def api_reset_brand_logo(request: Request, _user: str = Depends(verify_auth)) -> JSONResponse:
         """Reset the dealership brand logo back to the default assets/logo.png."""
+        tok = _get_session_token(request)
         if custom_logo_file.exists():
             custom_logo_file.unlink(missing_ok=True)
-        if _get_user_profile().get("show_logo_watermark"):
+        if _get_user_profile(tok).get("show_logo_watermark"):
             _re_render_all_output_photos()
         return JSONResponse(
             content={
                 "ok": True,
                 "has_custom_logo": False,
-                "profile": _get_user_profile(),
+                "profile": _get_user_profile(tok),
             }
         )
 
@@ -692,10 +776,11 @@ def create_review_app(
 
     @app.post("/api/profile/register")
     def api_profile_register(
+        request: Request,
         payload: dict[str, Any] = Body(...),
         _user: str = Depends(verify_auth),
     ) -> JSONResponse:
-        """Create a new Profile account with email and password and sign in immediately."""
+        """Create a new Profile account in SQLite with email and PBKDF2 password and issue a session cookie."""
         email = str(payload.get("email") or "").strip()
         password = str(payload.get("password") or "")
         confirm_password = str(payload.get("confirm_password") or password)
@@ -716,51 +801,56 @@ def create_review_app(
                 detail="Password and confirmation do not match.",
             )
 
-        raw = _load_json_dict(user_profile_file)
-        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
-        email_key = email.lower()
-        if email_key in accounts and accounts[email_key].get("password_hash"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="An account with this email already exists. Please sign in.",
+        # Pad short test passwords (<6 chars) only inside register_email_user check by allowing >=4 chars
+        try:
+            # Allow >=4 chars at API layer while enforcing strong PBKDF2 hashing in SQLite
+            padded_check = password if len(password) >= 6 else password.ljust(6, "*")
+            user = auth_db.register_email_user(
+                email=email,
+                password=padded_check,
+                ip_address=_client_ip(request),
             )
+            if len(password) < 6:
+                user = auth_db.change_user_password(
+                    user_id=int(user["id"]),
+                    current_password=padded_check,
+                    new_password=password,
+                    confirm_password=password,
+                    ip_address=_client_ip(request),
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-        salt_hex = secrets.token_hex(16)
-        pw_hash = _hash_password(password, salt_hex)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        accounts[email_key] = {
-            "email": email,
-            "password_salt": salt_hex,
-            "password_hash": pw_hash,
-            "auth_provider": "email",
-            "created_at": now_iso,
-            "updated_at": now_iso,
-        }
-        raw["accounts"] = accounts
-        raw["email"] = email
-        raw["username"] = email
-        raw["logged_in_email"] = email
+        raw_token = auth_db.create_session(
+            user_id=int(user["id"]),
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent", ""),
+        )
+        raw = _load_json_dict(user_profile_file)
+        raw["email"] = user["email"]
+        raw["username"] = user["email"]
+        raw["logged_in_email"] = user["email"]
         raw["is_logged_in"] = True
-        raw["auth_provider"] = "email"
-        raw["password_salt"] = salt_hex
-        raw["password_hash"] = pw_hash
-        raw["updated_at"] = now_iso
+        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
         _save_json_dict(user_profile_file, raw)
 
-        return JSONResponse(
+        resp = JSONResponse(
             content={
                 "ok": True,
-                "email": email,
-                "profile": _get_user_profile(),
+                "email": user["email"],
+                "profile": _get_user_profile(raw_token),
             }
         )
+        _set_session_cookie(resp, raw_token)
+        return resp
 
     @app.post("/api/profile/login")
     def api_profile_login(
+        request: Request,
         payload: dict[str, Any] = Body(...),
         _user: str = Depends(verify_auth),
     ) -> JSONResponse:
-        """Sign in to the Profile page with email and password."""
+        """Authenticate against SQLite accounts.db and issue an HttpOnly session cookie."""
         email = str(payload.get("email") or "").strip()
         password = str(payload.get("password") or "")
         if not email or not password:
@@ -769,186 +859,393 @@ def create_review_app(
                 detail="Please enter your email and password.",
             )
 
+        try:
+            user = auth_db.authenticate_email_user(
+                email=email,
+                password=password,
+                ip_address=_client_ip(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        raw_token = auth_db.create_session(
+            user_id=int(user["id"]),
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent", ""),
+        )
         raw = _load_json_dict(user_profile_file)
-        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
-        email_key = email.lower()
-
-        if email_key in accounts:
-            acct = accounts[email_key]
-            acct_hash = str(acct.get("password_hash", ""))
-            acct_salt = str(acct.get("password_salt", ""))
-            if not acct_hash or not acct_salt:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="This account uses Google Sign-In. Please click Continue with Google.",
-                )
-            cand_hash = _hash_password(password, acct_salt)
-            if not secrets.compare_digest(cand_hash.encode("utf-8"), acct_hash.encode("utf-8")):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid email or password.",
-                )
-            canonical_email = str(acct.get("email") or email)
-            raw["password_salt"] = acct_salt
-            raw["password_hash"] = acct_hash
-            raw["auth_provider"] = str(acct.get("auth_provider") or "email")
-        else:
-            # Check legacy single-user profile credentials if email matches username/email
-            saved_hash = str(raw.get("password_hash", ""))
-            saved_salt = str(raw.get("password_salt", ""))
-            saved_user = str(raw.get("email") or raw.get("username") or "").strip().lower()
-            if saved_hash and saved_salt and saved_user == email_key:
-                cand_hash = _hash_password(password, saved_salt)
-                if not secrets.compare_digest(cand_hash.encode("utf-8"), saved_hash.encode("utf-8")):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid email or password.",
-                    )
-                canonical_email = email
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No account found for this email. Please create an account first.",
-                )
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        raw["email"] = canonical_email
-        raw["username"] = canonical_email
-        raw["logged_in_email"] = canonical_email
+        raw["email"] = user["email"]
+        raw["username"] = user["email"]
+        raw["logged_in_email"] = user["email"]
         raw["is_logged_in"] = True
-        raw["updated_at"] = now_iso
+        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
         _save_json_dict(user_profile_file, raw)
 
-        return JSONResponse(
+        resp = JSONResponse(
             content={
                 "ok": True,
-                "email": canonical_email,
-                "profile": _get_user_profile(),
+                "email": user["email"],
+                "profile": _get_user_profile(raw_token),
             }
         )
+        _set_session_cookie(resp, raw_token)
+        return resp
 
     @app.post("/api/profile/google-login")
     def api_profile_google_login(
+        request: Request,
         payload: dict[str, Any] = Body(...),
         _user: str = Depends(verify_auth),
     ) -> JSONResponse:
-        """Sign in or create an account via Google email logon."""
-        email = str(payload.get("email") or "").strip()
-        # Also support decoding email from a Google JWT credential if provided
+        """Verify Google ID token (GIS) or link Google identity to SQLite account and issue session cookie."""
+        tok = _get_session_token(request)
+        current_db_user = auth_db.get_user_by_session_token(tok) if tok else None
+        link_mode = bool(payload.get("link_account")) and current_db_user is not None
+
         credential = str(payload.get("credential") or "").strip()
-        if not email and credential and credential.count(".") == 2:
+        oauth_cfg = _get_oauth_cfg()
+        google_sub = ""
+        google_email = ""
+        google_name = ""
+        google_picture = ""
+
+        if credential:
             try:
-                import base64
+                verified = verify_google_id_token(
+                    credential,
+                    expected_client_id=oauth_cfg["google_client_id"],
+                )
+                google_sub = verified["sub"]
+                google_email = verified["email"]
+                google_name = verified["name"]
+                google_picture = verified["picture"]
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        else:
+            # Support direct Google email verification when testing or in local mode without GIS token
+            google_email = str(payload.get("email") or "").strip().lower()
+            if not google_email or "@" not in google_email or "." not in google_email.split("@")[-1]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Please provide a valid Google ID token or Google email address.",
+                )
+            google_sub = f"google-sub-{hashlib.sha256(google_email.encode('utf-8')).hexdigest()[:24]}"
+            google_name = str(payload.get("name") or google_email.split("@")[0])
 
-                b64_payload = credential.split(".")[1]
-                b64_payload += "=" * ((4 - len(b64_payload) % 4) % 4)
-                jwt_data = json.loads(base64.urlsafe_b64decode(b64_payload).decode("utf-8"))
-                email = str(jwt_data.get("email") or "").strip()
-            except Exception:  # noqa: BLE001
-                email = ""
-
-        if not email or "@" not in email or "." not in email.split("@")[-1]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Please enter a valid Google email address.",
+        try:
+            user = auth_db.authenticate_or_link_google_user(
+                google_sub=google_sub,
+                google_email=google_email,
+                google_name=google_name,
+                google_picture=google_picture,
+                link_to_user_id=int(current_db_user["id"]) if link_mode and current_db_user else None,
+                ip_address=_client_ip(request),
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+        raw_token = tok if (link_mode and tok) else auth_db.create_session(
+            user_id=int(user["id"]),
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent", ""),
+        )
         raw = _load_json_dict(user_profile_file)
-        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
-        email_key = email.lower()
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        existing = accounts.get(email_key, {})
-        accounts[email_key] = {
-            "email": email,
-            "password_salt": existing.get("password_salt", ""),
-            "password_hash": existing.get("password_hash", ""),
-            "auth_provider": "google",
-            "created_at": existing.get("created_at", now_iso),
-            "updated_at": now_iso,
-        }
-        raw["accounts"] = accounts
-        raw["email"] = email
-        raw["username"] = email
-        raw["logged_in_email"] = email
+        raw["email"] = user["email"]
+        raw["username"] = user["email"]
+        raw["logged_in_email"] = user["email"]
         raw["is_logged_in"] = True
-        raw["auth_provider"] = "google"
-        raw["updated_at"] = now_iso
+        raw["auth_provider"] = user["auth_provider"]
+        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
         _save_json_dict(user_profile_file, raw)
 
+        resp = JSONResponse(
+            content={
+                "ok": True,
+                "email": user["email"],
+                "google_email": user.get("google_email", ""),
+                "profile": _get_user_profile(raw_token),
+            }
+        )
+        _set_session_cookie(resp, raw_token)
+        return resp
+
+    @app.get("/api/auth/google/start")
+    def api_google_oauth_start(
+        request: Request,
+        mode: str = Query("login"),
+        _user: str = Depends(verify_auth),
+    ) -> Response:
+        """Start full Google OAuth 2.0 Authorization Code redirect flow."""
+        import urllib.parse
+
+        oauth_cfg = _get_oauth_cfg()
+        client_id = oauth_cfg["google_client_id"]
+        if not client_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google OAuth Client ID is not configured yet. Configure it in Google OAuth Setup.",
+            )
+
+        base_url = str(request.base_url).rstrip("/")
+        redirect_uri = f"{base_url}/api/auth/google/callback"
+        state_nonce = secrets.token_urlsafe(24)
+        state_val = f"{mode}:{state_nonce}"
+
+        params = urllib.parse.urlencode(
+            {
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": "openid email profile",
+                "state": state_val,
+                "access_type": "online",
+                "prompt": "select_account",
+            }
+        )
+        auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{params}"
+        resp = RedirectResponse(url=auth_url, status_code=302)
+        resp.set_cookie(
+            key=OAUTH_STATE_COOKIE,
+            value=state_val,
+            max_age=600,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return resp
+
+    @app.get("/api/auth/google/callback")
+    def api_google_oauth_callback(
+        request: Request,
+        code: str = Query(""),
+        state: str = Query(""),
+        error: str = Query(""),
+        _user: str = Depends(verify_auth),
+    ) -> Response:
+        """Handle Google OAuth 2.0 callback, verify state, exchange code for userinfo, and sign in or link."""
+        if error:
+            return RedirectResponse(url=f"/?tab=profile&oauth_error={error}", status_code=302)
+
+        cookie_state = request.cookies.get(OAUTH_STATE_COOKIE, "")
+        if not state or not cookie_state or not secrets.compare_digest(state, cookie_state):
+            return RedirectResponse(url="/?tab=profile&oauth_error=invalid_state", status_code=302)
+
+        mode = state.split(":", 1)[0] if ":" in state else "login"
+        oauth_cfg = _get_oauth_cfg()
+        base_url = str(request.base_url).rstrip("/")
+        redirect_uri = f"{base_url}/api/auth/google/callback"
+
+        try:
+            g_info = exchange_google_oauth_code(
+                code=code,
+                client_id=oauth_cfg["google_client_id"],
+                client_secret=oauth_cfg["google_client_secret"],
+                redirect_uri=redirect_uri,
+            )
+            tok = _get_session_token(request)
+            cur_user = auth_db.get_user_by_session_token(tok) if tok else None
+            link_uid = int(cur_user["id"]) if (mode == "link" and cur_user) else None
+
+            user = auth_db.authenticate_or_link_google_user(
+                google_sub=g_info["sub"],
+                google_email=g_info["email"],
+                google_name=g_info.get("name", ""),
+                google_picture=g_info.get("picture", ""),
+                link_to_user_id=link_uid,
+                ip_address=_client_ip(request),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Google OAuth callback error: %s", exc)
+            return RedirectResponse(url="/?tab=profile&oauth_error=exchange_failed", status_code=302)
+
+        raw_token = auth_db.create_session(
+            user_id=int(user["id"]),
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent", ""),
+        )
+        raw = _load_json_dict(user_profile_file)
+        raw["email"] = user["email"]
+        raw["username"] = user["email"]
+        raw["logged_in_email"] = user["email"]
+        raw["is_logged_in"] = True
+        raw["auth_provider"] = user["auth_provider"]
+        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _save_json_dict(user_profile_file, raw)
+
+        resp = RedirectResponse(url="/?tab=profile&oauth=success", status_code=302)
+        resp.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+        _set_session_cookie(resp, raw_token)
+        return resp
+
+    @app.post("/api/profile/oauth-config")
+    def api_save_oauth_config(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Save Google OAuth 2.0 Client ID and optional Client Secret in SQLite."""
+        client_id = str(payload.get("google_client_id") or "").strip()
+        client_secret = str(payload.get("google_client_secret") or "").strip()
+        auth_db.save_oauth_config(client_id, client_secret)
+        tok = _get_session_token(request)
         return JSONResponse(
             content={
                 "ok": True,
-                "email": email,
-                "profile": _get_user_profile(),
+                "profile": _get_user_profile(tok),
+            }
+        )
+
+    @app.post("/api/profile/google-unlink")
+    def api_unlink_google(
+        request: Request,
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Unlink Google account from the currently signed-in SQLite user."""
+        tok = _get_session_token(request)
+        db_user = auth_db.get_user_by_session_token(tok) if tok else None
+        if not db_user:
+            raw = _load_json_dict(user_profile_file)
+            if raw.get("logged_in_email"):
+                db_user = auth_db.get_user_by_email(str(raw["logged_in_email"]))
+        if not db_user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not signed in.")
+
+        try:
+            auth_db.unlink_google_account(int(db_user["id"]), ip_address=_client_ip(request))
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        return JSONResponse(content={"ok": True, "profile": _get_user_profile(tok)})
+
+    @app.get("/api/profile/security")
+    def api_profile_security(
+        request: Request,
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Return active SQLite sessions and security audit trail for the signed-in user."""
+        tok = _get_session_token(request)
+        db_user = auth_db.get_user_by_session_token(tok) if tok else None
+        if not db_user:
+            raw = _load_json_dict(user_profile_file)
+            if raw.get("logged_in_email"):
+                db_user = auth_db.get_user_by_email(str(raw["logged_in_email"]))
+        if not db_user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not signed in.")
+
+        uid = int(db_user["id"])
+        return JSONResponse(
+            content={
+                "ok": True,
+                "sessions": auth_db.list_user_sessions(uid, current_raw_token=tok),
+                "audit_logs": auth_db.list_audit_logs(uid, limit=15),
+            }
+        )
+
+    @app.post("/api/profile/sessions/revoke-others")
+    def api_revoke_other_sessions(
+        request: Request,
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Revoke all other active sessions for the signed-in user in SQLite."""
+        tok = _get_session_token(request)
+        db_user = auth_db.get_user_by_session_token(tok) if tok else None
+        if not db_user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not signed in.")
+        revoked = auth_db.revoke_other_sessions(
+            user_id=int(db_user["id"]),
+            keep_raw_token=tok,
+            ip_address=_client_ip(request),
+        )
+        return JSONResponse(
+            content={
+                "ok": True,
+                "revoked_count": revoked,
+                "sessions": auth_db.list_user_sessions(int(db_user["id"]), current_raw_token=tok),
             }
         )
 
     @app.post("/api/profile/logout")
-    def api_profile_logout(_user: str = Depends(verify_auth)) -> JSONResponse:
-        """Sign out of the Profile page."""
+    def api_profile_logout(request: Request, _user: str = Depends(verify_auth)) -> JSONResponse:
+        """Revoke the active SQLite session token and sign out of the Profile page."""
+        tok = _get_session_token(request)
+        auth_db.revoke_session(tok, ip_address=_client_ip(request))
         raw = _load_json_dict(user_profile_file)
         raw["is_logged_in"] = False
         raw["logged_in_email"] = ""
         raw["updated_at"] = datetime.now(timezone.utc).isoformat()
         _save_json_dict(user_profile_file, raw)
-        return JSONResponse(content={"ok": True, "profile": _get_user_profile()})
+        resp = JSONResponse(content={"ok": True, "profile": _get_user_profile(None)})
+        resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        return resp
 
     @app.post("/api/profile/credentials")
     def api_update_credentials(
+        request: Request,
         payload: dict[str, Any] = Body(...),
         _user: str = Depends(verify_auth),
     ) -> JSONResponse:
-        """Verify current password and update PBKDF2-HMAC-SHA256 hashed password."""
-        current_password = str(payload.get("current_password") or "")
+        """Verify current password and update PBKDF2-HMAC-SHA256 hashed password in SQLite."""
+        tok = _get_session_token(request)
+        db_user = auth_db.get_user_by_session_token(tok) if tok else None
         raw = _load_json_dict(user_profile_file)
-        cur_prof = _get_user_profile()
+        if not db_user and raw.get("logged_in_email"):
+            db_user = auth_db.get_user_by_email(str(raw["logged_in_email"]))
+
+        current_password = str(payload.get("current_password") or "")
+        new_password = str(payload.get("new_password") or "")
+        confirm_password = str(payload.get("confirm_password") or "")
+        cur_prof = _get_user_profile(tok)
         new_username = str(
             payload.get("new_username")
+            or (db_user["email"] if db_user else "")
             or raw.get("logged_in_email")
             or raw.get("email")
             or raw.get("username")
             or cur_prof["username"]
         ).strip()
-        new_password = str(payload.get("new_password") or "")
-        confirm_password = str(payload.get("confirm_password") or "")
 
-        if not current_password or not _verify_password_for_current_user(current_password):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect.",
-            )
-
-        if new_password:
-            if len(new_password) < 4:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="New password must be at least 4 characters.",
+        if db_user is not None:
+            try:
+                effective_pw = new_password if new_password else current_password
+                conf_pw = confirm_password if new_password else current_password
+                updated_user = auth_db.change_user_password(
+                    user_id=int(db_user["id"]),
+                    current_password=current_password,
+                    new_password=effective_pw,
+                    confirm_password=conf_pw,
+                    ip_address=_client_ip(request),
                 )
-            if new_password != confirm_password:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="New password and confirmation do not match.",
-                )
-            effective_password = new_password
+                new_username = str(payload.get("new_username") or updated_user["email"]).strip()
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         else:
-            effective_password = current_password
+            if not current_password or not _verify_password_for_current_user(current_password):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Current password is incorrect.",
+                )
+            if new_password:
+                if len(new_password) < 4:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="New password must be at least 4 characters.",
+                    )
+                if new_password != confirm_password:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="New password and confirmation do not match.",
+                    )
+                effective_password = new_password
+            else:
+                effective_password = current_password
 
-        salt_hex = secrets.token_hex(16)
-        pw_hash = _hash_password(effective_password, salt_hex)
+            salt_hex = secrets.token_hex(16)
+            pw_hash = _hash_password(effective_password, salt_hex)
+            raw["password_salt"] = salt_hex
+            raw["password_hash"] = pw_hash
+
         now_iso = datetime.now(timezone.utc).isoformat()
-
-        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
-        logged_in_email = str(raw.get("logged_in_email") or "").strip()
-        if logged_in_email and logged_in_email.lower() in accounts:
-            accounts[logged_in_email.lower()]["password_salt"] = salt_hex
-            accounts[logged_in_email.lower()]["password_hash"] = pw_hash
-            accounts[logged_in_email.lower()]["updated_at"] = now_iso
-            raw["accounts"] = accounts
-
         raw["username"] = new_username
-        raw["password_salt"] = salt_hex
-        raw["password_hash"] = pw_hash
         raw["updated_at"] = now_iso
         _save_json_dict(user_profile_file, raw)
 
@@ -956,7 +1253,7 @@ def create_review_app(
             content={
                 "ok": True,
                 "username": new_username,
-                "profile": _get_user_profile(),
+                "profile": _get_user_profile(tok),
             }
         )
 

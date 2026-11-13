@@ -915,35 +915,59 @@ tailwind.config = {
 
       <!-- Right Column: Account & Password Menu + Workspace Overview -->
       <div class="lg:col-span-5 space-y-6">
-        <!-- Card 3: Account & Password Setup (Menu style, no Username input, no open password fields) -->
+        <!-- Card 3: Account & Password Setup (Menu style, SQLite-backed, Google Link, Sessions & Audit Log) -->
         <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
-          <div class="flex items-center gap-2.5">
-            <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
-              <span class="material-symbols-outlined text-[20px]">lock</span>
-            </div>
-            <div>
-              <h2 class="text-base font-bold text-on-surface">Account &amp; Password Setup</h2>
-              <p class="text-xs text-on-surface-variant">Manage your signed-in account and password security.</p>
-            </div>
-          </div>
-
-          <!-- Signed-in Email Summary Row -->
-          <div class="p-4 rounded-2xl bg-surface border border-outline-variant/30 flex items-center justify-between gap-3">
-            <div class="flex items-center gap-3 min-w-0">
-              <div class="w-9 h-9 rounded-full bg-primary-fixed/80 text-primary flex items-center justify-center font-bold text-xs shrink-0" id="profile-acct-avatar">
-                U
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+                <span class="material-symbols-outlined text-[20px]">shield_lock</span>
               </div>
-              <div class="min-w-0">
-                <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Signed-in Email</span>
-                <span id="profile-acct-email-display" class="text-sm font-bold text-on-surface truncate block">user@forestwheel.com</span>
+              <div>
+                <h2 class="text-base font-bold text-on-surface">Account &amp; Password Setup</h2>
+                <p class="text-xs text-on-surface-variant">SQLite account security, Google link &amp; sessions.</p>
               </div>
             </div>
-            <span id="profile-acct-provider-badge" class="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-primary-fixed text-primary shrink-0">
-              Email
+            <span id="profile-acct-id-badge" class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container text-on-surface-variant">
+              DB #1
             </span>
           </div>
 
-          <!-- Menu Options List (Opens Change Password Menu Modal) -->
+          <!-- Signed-in Email Summary Row -->
+          <div class="p-4 rounded-2xl bg-surface border border-outline-variant/30 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-9 h-9 rounded-full bg-primary-fixed/80 text-primary flex items-center justify-center font-bold text-xs shrink-0" id="profile-acct-avatar">
+                  U
+                </div>
+                <div class="min-w-0">
+                  <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Primary Account Email</span>
+                  <span id="profile-acct-email-display" class="text-sm font-bold text-on-surface truncate block">user@forestwheel.com</span>
+                </div>
+              </div>
+              <span id="profile-acct-provider-badge" class="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-primary-fixed text-primary shrink-0">
+                Email
+              </span>
+            </div>
+
+            <!-- Linked Google Account Status Bar -->
+            <div class="pt-2.5 border-t border-outline-variant/25 flex items-center justify-between gap-2 text-xs">
+              <div class="flex items-center gap-2 min-w-0">
+                <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.8-5.5 3.8-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 6.6 2.2 2.2 6.6 2.2 12S6.6 21.8 12 21.8c6.9 0 9.6-4.8 9.6-7.3 0-.5-.1-.9-.1-1.3H12z"/>
+                  <path fill="#34A853" d="M3.3 7.3l3.2 2.4C7.4 7.5 9.5 5.9 12 5.9c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 8.2 2.2 4.9 4.3 3.3 7.3z"/>
+                  <path fill="#FBBC05" d="M12 21.8c2.6 0 4.8-.9 6.4-2.4l-3-2.5c-.8.6-1.9 1-3.4 1-2.5 0-4.7-1.7-5.5-4.1l-3.2 2.5c1.6 3.2 4.9 5.5 8.7 5.5z"/>
+                  <path fill="#4285F4" d="M21.6 14.5c.1-.5.2-1.1.2-1.8 0-.6-.1-1.2-.2-1.7H12v3.9h5.5c-.3 1.3-1.1 2.4-2.1 3.1l3 2.5c1.8-1.6 3.2-4 3.2-6z"/>
+                </svg>
+                <span id="profile-google-link-status" class="text-on-surface-variant truncate">Google not linked</span>
+              </div>
+              <button type="button" id="btn-google-link-action" onclick="handleGoogleLinkAction()"
+                      class="text-xs font-bold text-primary hover:underline shrink-0">
+                Link Google
+              </button>
+            </div>
+          </div>
+
+          <!-- Menu Options List (Opens Dedicated Modals) -->
           <div class="rounded-2xl bg-surface border border-outline-variant/30 divide-y divide-outline-variant/25 overflow-hidden">
             <button type="button" onclick="openChangePasswordModal()"
                     class="w-full px-4 py-3.5 hover:bg-surface-container/70 transition-all flex items-center justify-between text-left group">
@@ -953,7 +977,35 @@ tailwind.config = {
                 </div>
                 <div>
                   <span class="text-sm font-semibold text-on-surface block">Change Password</span>
-                  <span class="text-[11px] text-on-surface-variant">Update your account login password</span>
+                  <span class="text-[11px] text-on-surface-variant">Update your PBKDF2-SHA256 account password</span>
+                </div>
+              </div>
+              <span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface group-hover:translate-x-0.5 transition-all">chevron_right</span>
+            </button>
+
+            <button type="button" onclick="openGoogleLoginModal(true)"
+                    class="w-full px-4 py-3.5 hover:bg-surface-container/70 transition-all flex items-center justify-between text-left group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-white border border-outline-variant/30 flex items-center justify-center text-primary shadow-2xs">
+                  <span class="material-symbols-outlined text-[18px]">add_link</span>
+                </div>
+                <div>
+                  <span class="text-sm font-semibold text-on-surface block">Google OAuth &amp; Email Link</span>
+                  <span class="text-[11px] text-on-surface-variant">Link Google email or configure OAuth Client ID</span>
+                </div>
+              </div>
+              <span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface group-hover:translate-x-0.5 transition-all">chevron_right</span>
+            </button>
+
+            <button type="button" onclick="openSecuritySessionsModal()"
+                    class="w-full px-4 py-3.5 hover:bg-surface-container/70 transition-all flex items-center justify-between text-left group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-white border border-outline-variant/30 flex items-center justify-center text-primary shadow-2xs">
+                  <span class="material-symbols-outlined text-[18px]">devices</span>
+                </div>
+                <div>
+                  <span class="text-sm font-semibold text-on-surface block">Active Sessions &amp; Security Log</span>
+                  <span class="text-[11px] text-on-surface-variant">Inspect SQLite sessions and login audit trail</span>
                 </div>
               </div>
               <span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface group-hover:translate-x-0.5 transition-all">chevron_right</span>
@@ -967,7 +1019,7 @@ tailwind.config = {
                 </div>
                 <div>
                   <span class="text-sm font-semibold text-error block">Sign Out</span>
-                  <span class="text-[11px] text-on-surface-variant">Return to Profile sign-in screen</span>
+                  <span class="text-[11px] text-on-surface-variant">Revoke session cookie and return to sign-in</span>
                 </div>
               </div>
               <span class="material-symbols-outlined text-[20px] text-outline group-hover:text-error transition-all">chevron_right</span>
@@ -1071,10 +1123,10 @@ tailwind.config = {
 </div>
 
 <!-- ========================================================================= -->
-<!-- GOOGLE EMAIL LOGON MODAL                                                  -->
+<!-- GOOGLE OAUTH 2.0 & EMAIL CONNECTION MODAL                                 -->
 <!-- ========================================================================= -->
 <div id="google-login-modal" class="fixed inset-0 z-50 hidden bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-  <div class="bg-white rounded-[28px] max-w-md w-full p-6 sm:p-7 space-y-5 shadow-apple-float border border-outline-variant/30">
+  <div class="bg-white rounded-[28px] max-w-lg w-full p-6 sm:p-7 space-y-5 shadow-apple-float border border-outline-variant/30 max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-2.5">
         <div class="w-9 h-9 rounded-xl bg-surface border border-outline-variant/40 flex items-center justify-center">
@@ -1086,8 +1138,8 @@ tailwind.config = {
           </svg>
         </div>
         <div>
-          <h3 class="text-base font-bold text-on-surface">Sign in with Google</h3>
-          <p class="text-xs text-on-surface-variant">Connect your Google email to access Profile settings.</p>
+          <h3 id="google-modal-title" class="text-base font-bold text-on-surface">Connect with Google</h3>
+          <p id="google-modal-subtitle" class="text-xs text-on-surface-variant">Sign in or link your account with Google OAuth 2.0.</p>
         </div>
       </div>
       <button type="button" onclick="closeGoogleLoginModal()" class="w-8 h-8 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface">
@@ -1095,25 +1147,120 @@ tailwind.config = {
       </button>
     </div>
 
-    <div>
-      <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Google Email Address</label>
-      <input id="google-email-input" type="email" autocomplete="email" placeholder="yourname@gmail.com"
-             onkeydown="if(event.key==='Enter') submitGoogleEmailLogin();"
-             class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+    <!-- Real Google OAuth 2.0 Redirect & GIS Button Section -->
+    <div id="google-oauth-live-box" class="p-4 rounded-2xl bg-primary-fixed/30 border border-primary/20 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-primary flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-[16px]">verified</span>
+          <span>Google OAuth 2.0 Verification</span>
+        </span>
+        <span id="google-oauth-status-pill" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+          Client ID Not Set
+        </span>
+      </div>
+      <div id="g_id_signin_container" class="flex justify-center"></div>
+      <button type="button" id="btn-google-oauth-redirect" onclick="startGoogleOAuthRedirect()"
+              class="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-surface border border-outline-variant/50 text-xs font-bold text-on-surface shadow-2xs transition-all flex items-center justify-center gap-2">
+        <span class="material-symbols-outlined text-[16px] text-primary">open_in_new</span>
+        <span>Redirect to Google OAuth 2.0 Consent Screen</span>
+      </button>
+    </div>
+
+    <!-- Direct Google Email Link / Sign-In -->
+    <div class="space-y-2">
+      <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Google Email Address</label>
+      <div class="flex gap-2">
+        <input id="google-email-input" type="email" autocomplete="email" placeholder="yourname@gmail.com"
+               onkeydown="if(event.key==='Enter') submitGoogleEmailLogin();"
+               class="flex-1 px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+        <button type="button" onclick="submitGoogleEmailLogin()"
+                class="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-white text-xs font-semibold shadow-sm transition-all shrink-0">
+          Connect Email
+        </button>
+      </div>
+    </div>
+
+    <!-- Expandable Google Cloud OAuth 2.0 Client ID / Secret Configuration -->
+    <div class="pt-2 border-t border-outline-variant/30">
+      <button type="button" onclick="document.getElementById('oauth-config-drawer').classList.toggle('hidden')"
+              class="w-full flex items-center justify-between text-xs font-semibold text-on-surface-variant hover:text-on-surface py-1">
+        <span class="flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-[16px]">settings</span>
+          <span>Configure Google Cloud OAuth 2.0 Client ID &amp; Secret</span>
+        </span>
+        <span class="material-symbols-outlined text-[18px]">expand_more</span>
+      </button>
+
+      <div id="oauth-config-drawer" class="hidden mt-3 p-4 rounded-2xl bg-surface border border-outline-variant/30 space-y-3">
+        <p class="text-[11px] text-on-surface-variant leading-relaxed">
+          In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" class="text-primary font-semibold underline">Google Cloud Console → Credentials</a>, create an <strong>OAuth 2.0 Web Client ID</strong> and add this Authorized Redirect URI:
+          <code id="oauth-callback-uri-hint" class="block mt-1 px-2.5 py-1.5 rounded-lg bg-white border border-outline-variant/40 text-[11px] font-mono text-on-surface select-all">http://127.0.0.1:8000/api/auth/google/callback</code>
+        </p>
+        <div>
+          <label class="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Google OAuth Client ID</label>
+          <input id="oauth-client-id-input" type="text" placeholder="1234567890-abc...apps.googleusercontent.com"
+                 class="w-full px-3 py-2 rounded-xl bg-white border border-outline-variant/40 text-xs font-mono text-on-surface focus:outline-none focus:border-primary"/>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Google OAuth Client Secret</label>
+          <input id="oauth-client-secret-input" type="password" placeholder="GOCSPX-..."
+                 class="w-full px-3 py-2 rounded-xl bg-white border border-outline-variant/40 text-xs font-mono text-on-surface focus:outline-none focus:border-primary"/>
+        </div>
+        <div class="flex justify-end">
+          <button type="button" onclick="saveGoogleOAuthConfig()"
+                  class="px-4 py-2 rounded-xl bg-on-surface hover:opacity-90 text-white text-xs font-semibold transition-all">
+            Save OAuth Credentials
+          </button>
+        </div>
+      </div>
     </div>
 
     <p id="google-login-feedback" class="text-xs font-semibold text-error hidden"></p>
+  </div>
+</div>
 
-    <div class="flex items-center justify-end gap-2.5 pt-1">
-      <button type="button" onclick="closeGoogleLoginModal()"
-              class="px-4 py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant text-xs font-semibold transition-all">
-        Cancel
+<!-- ========================================================================= -->
+<!-- ACTIVE SESSIONS & SECURITY AUDIT LOG MODAL                                -->
+<!-- ========================================================================= -->
+<div id="security-sessions-modal" class="fixed inset-0 z-50 hidden bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="bg-white rounded-[28px] max-w-2xl w-full p-6 sm:p-7 space-y-5 shadow-apple-float border border-outline-variant/30 max-h-[88vh] flex flex-col">
+    <div class="flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+          <span class="material-symbols-outlined text-[20px]">devices</span>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-on-surface">Active Sessions &amp; Security Audit Log</h3>
+          <p class="text-xs text-on-surface-variant">Live SQLite session tokens (`accounts.db`) and authentication events.</p>
+        </div>
+      </div>
+      <button type="button" onclick="closeSecuritySessionsModal()" class="w-8 h-8 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface">
+        <span class="material-symbols-outlined text-[18px]">close</span>
       </button>
-      <button type="button" onclick="submitGoogleEmailLogin()"
-              class="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
-        <span>Continue</span>
-        <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
-      </button>
+    </div>
+
+    <div class="overflow-y-auto space-y-5 pr-1">
+      <!-- Active Sessions List -->
+      <div class="space-y-2.5">
+        <div class="flex items-center justify-between">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Active Login Sessions</h4>
+          <button type="button" onclick="revokeOtherSessions()"
+                  class="text-xs font-bold text-error hover:underline">
+            Revoke Other Sessions
+          </button>
+        </div>
+        <div id="security-sessions-list" class="space-y-2">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Security Audit Trail -->
+      <div class="space-y-2.5">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Recent Security Audit Log</h4>
+        <div id="security-audit-list" class="rounded-2xl bg-surface border border-outline-variant/30 divide-y divide-outline-variant/20 overflow-hidden text-xs">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -3062,11 +3209,135 @@ tailwind.config = {
     }
   }
 
-  function openGoogleLoginModal() {
+  let googleModalLinkMode = false;
+  let gsiScriptLoaded = false;
+
+  function ensureGoogleGsiScript(callback) {
+    if (window.google && window.google.accounts && window.google.accounts.id) {
+      callback();
+      return;
+    }
+    if (gsiScriptLoaded) return;
+    gsiScriptLoaded = true;
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.defer = true;
+    s.onload = () => { if (callback) callback(); };
+    document.head.appendChild(s);
+  }
+
+  function renderGoogleGsiButtonIfConfigured() {
+    const prof = (appState && appState.profile) ? appState.profile : {};
+    const cid = (prof.google_client_id || '').trim();
+    const pill = document.getElementById('google-oauth-status-pill');
+    const cidInput = document.getElementById('oauth-client-id-input');
+    if (cidInput && cid && !cidInput.value) cidInput.value = cid;
+
+    const hintEl = document.getElementById('oauth-callback-uri-hint');
+    if (hintEl) hintEl.textContent = window.location.origin + '/api/auth/google/callback';
+
+    if (!cid) {
+      if (pill) {
+        pill.textContent = 'Client ID Not Set';
+        pill.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800';
+      }
+      return;
+    }
+    if (pill) {
+      pill.textContent = 'OAuth 2.0 Ready';
+      pill.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700';
+    }
+    ensureGoogleGsiScript(() => {
+      if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+      const container = document.getElementById('g_id_signin_container');
+      if (!container) return;
+      container.innerHTML = '';
+      window.google.accounts.id.initialize({
+        client_id: cid,
+        callback: handleGoogleCredentialResponse
+      });
+      window.google.accounts.id.renderButton(container, {
+        theme: 'outline',
+        size: 'large',
+        width: 320,
+        text: googleModalLinkMode ? 'continue_with' : 'signin_with'
+      });
+    });
+  }
+
+  async function handleGoogleCredentialResponse(response) {
+    if (!response || !response.credential) return;
+    try {
+      const res = await fetch('/api/profile/google-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          credential: response.credential,
+          link_account: googleModalLinkMode
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        closeGoogleLoginModal();
+        appState.profile = data.profile;
+        syncUiWithProfile(data.profile);
+        populateProfilePage();
+        showProfileFeedback('profile-cred-feedback', 'Verified & connected with Google OAuth!', false);
+      } else {
+        showProfileFeedback('google-login-feedback', data.detail || 'Google token verification failed.', true);
+      }
+    } catch (err) {
+      showProfileFeedback('google-login-feedback', 'Network error verifying Google token.', true);
+    }
+  }
+
+  function startGoogleOAuthRedirect() {
+    const prof = (appState && appState.profile) ? appState.profile : {};
+    if (!prof.google_client_id) {
+      const drawer = document.getElementById('oauth-config-drawer');
+      if (drawer) drawer.classList.remove('hidden');
+      showProfileFeedback('google-login-feedback', 'Please configure your Google Cloud OAuth Client ID & Secret below first, or connect your Google email directly.', true);
+      return;
+    }
+    const mode = googleModalLinkMode ? 'link' : 'login';
+    window.location.href = `/api/auth/google/start?mode=${mode}`;
+  }
+
+  async function saveGoogleOAuthConfig() {
+    const cid = (document.getElementById('oauth-client-id-input')?.value || '').trim();
+    const sec = (document.getElementById('oauth-client-secret-input')?.value || '').trim();
+    try {
+      const res = await fetch('/api/profile/oauth-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ google_client_id: cid, google_client_secret: sec })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        appState.profile = data.profile;
+        renderGoogleGsiButtonIfConfigured();
+        showProfileFeedback('google-login-feedback', 'Google OAuth 2.0 credentials saved to SQLite!', false);
+      }
+    } catch (err) {
+      showProfileFeedback('google-login-feedback', 'Could not save OAuth settings.', true);
+    }
+  }
+
+  function openGoogleLoginModal(isLinking) {
+    googleModalLinkMode = Boolean(isLinking);
     const modal = document.getElementById('google-login-modal');
     if (modal) modal.classList.remove('hidden');
     const fb = document.getElementById('google-login-feedback');
     if (fb) fb.classList.add('hidden');
+
+    const titleEl = document.getElementById('google-modal-title');
+    if (titleEl) titleEl.textContent = googleModalLinkMode ? 'Link Google Account' : 'Sign in with Google';
+
+    renderGoogleGsiButtonIfConfigured();
+
     const emailInput = document.getElementById('google-email-input');
     const authEmail = (document.getElementById('auth-email-input')?.value || '').trim();
     if (emailInput) {
@@ -3091,7 +3362,10 @@ tailwind.config = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ email: email })
+        body: JSON.stringify({
+          email: email,
+          link_account: googleModalLinkMode
+        })
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -3099,11 +3373,108 @@ tailwind.config = {
         appState.profile = data.profile;
         syncUiWithProfile(data.profile);
         populateProfilePage();
+        if (googleModalLinkMode) {
+          showProfileFeedback('profile-cred-feedback', `Linked Google account (${email})!`, false);
+        }
       } else {
         showProfileFeedback('google-login-feedback', data.detail || 'Google sign-in failed.', true);
       }
     } catch (err) {
       showProfileFeedback('google-login-feedback', 'Network error during Google sign-in.', true);
+    }
+  }
+
+  async function handleGoogleLinkAction() {
+    const prof = (appState && appState.profile) ? appState.profile : {};
+    if (prof.google_linked) {
+      try {
+        const res = await fetch('/api/profile/google-unlink', {
+          method: 'POST',
+          credentials: 'same-origin'
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          appState.profile = data.profile;
+          populateProfilePage();
+          showProfileFeedback('profile-cred-feedback', 'Google account unlinked.', false);
+        } else {
+          showProfileFeedback('profile-cred-feedback', data.detail || 'Could not unlink Google account.', true);
+        }
+      } catch (err) {
+        showProfileFeedback('profile-cred-feedback', 'Network error unlinking Google account.', true);
+      }
+    } else {
+      openGoogleLoginModal(true);
+    }
+  }
+
+  async function openSecuritySessionsModal() {
+    const modal = document.getElementById('security-sessions-modal');
+    if (modal) modal.classList.remove('hidden');
+    await refreshSecuritySessionsModal();
+  }
+
+  function closeSecuritySessionsModal() {
+    const modal = document.getElementById('security-sessions-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  async function refreshSecuritySessionsModal() {
+    const sessContainer = document.getElementById('security-sessions-list');
+    const auditContainer = document.getElementById('security-audit-list');
+    try {
+      const res = await fetch('/api/profile/security', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const sessions = data.sessions || [];
+      const logs = data.audit_logs || [];
+
+      if (sessContainer) {
+        sessContainer.innerHTML = sessions.length === 0
+          ? '<p class="text-xs text-on-surface-variant p-3">No active token sessions.</p>'
+          : sessions.map(s => `
+              <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/30 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-on-surface">Session #${s.id_prefix}</span>
+                    ${s.is_current ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">Current Browser</span>' : ''}
+                  </div>
+                  <p class="text-[11px] text-on-surface-variant truncate mt-0.5">IP: ${s.ip_address} • ${s.user_agent}</p>
+                </div>
+                <span class="text-[10px] text-outline shrink-0">${(s.last_active_at || '').slice(0, 19).replace('T', ' ')}</span>
+              </div>
+            `).join('');
+      }
+
+      if (auditContainer) {
+        auditContainer.innerHTML = logs.length === 0
+          ? '<p class="text-xs text-on-surface-variant p-3">No security events recorded yet.</p>'
+          : logs.map(ev => `
+              <div class="px-3.5 py-2.5 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <span class="font-bold text-on-surface uppercase tracking-wider text-[10px] px-2 py-0.5 rounded bg-surface-container mr-1.5">${ev.event_type}</span>
+                  <span class="text-on-surface-variant">${ev.detail || ev.email}</span>
+                </div>
+                <span class="text-[10px] text-outline shrink-0">${(ev.created_at || '').slice(0, 19).replace('T', ' ')}</span>
+              </div>
+            `).join('');
+      }
+    } catch (err) {
+      console.error('Security modal fetch error:', err);
+    }
+  }
+
+  async function revokeOtherSessions() {
+    try {
+      const res = await fetch('/api/profile/sessions/revoke-others', {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+      if (res.ok) {
+        await refreshSecuritySessionsModal();
+      }
+    } catch (err) {
+      console.error('Revoke sessions error:', err);
     }
   }
 
@@ -3191,12 +3562,37 @@ tailwind.config = {
     const acctEmailEl = document.getElementById('profile-acct-email-display');
     if (acctEmailEl) acctEmailEl.textContent = activeEmail;
 
+    const acctIdBadge = document.getElementById('profile-acct-id-badge');
+    if (acctIdBadge) acctIdBadge.textContent = prof.user_id ? `SQLite #${prof.user_id}` : 'SQLite Active';
+
     const acctAvatarEl = document.getElementById('profile-acct-avatar');
     if (acctAvatarEl) acctAvatarEl.textContent = ((activeEmail[0] || 'U')).toUpperCase();
 
     const providerBadgeEl = document.getElementById('profile-acct-provider-badge');
     if (providerBadgeEl) {
-      providerBadgeEl.textContent = prof.auth_provider === 'google' ? 'Google Connected' : 'Email Account';
+      if (prof.auth_provider === 'both') {
+        providerBadgeEl.textContent = 'Email + Google';
+      } else if (prof.auth_provider === 'google') {
+        providerBadgeEl.textContent = 'Google OAuth';
+      } else {
+        providerBadgeEl.textContent = 'Email Account';
+      }
+    }
+
+    const gLinkStatus = document.getElementById('profile-google-link-status');
+    const gLinkBtn = document.getElementById('btn-google-link-action');
+    if (gLinkStatus && gLinkBtn) {
+      if (prof.google_linked && prof.google_email) {
+        gLinkStatus.textContent = `Linked: ${prof.google_email}`;
+        gLinkStatus.className = 'text-emerald-700 font-semibold truncate';
+        gLinkBtn.textContent = 'Unlink';
+        gLinkBtn.className = 'text-xs font-bold text-error hover:underline shrink-0';
+      } else {
+        gLinkStatus.textContent = 'Google email not linked';
+        gLinkStatus.className = 'text-on-surface-variant truncate';
+        gLinkBtn.textContent = 'Link Google';
+        gLinkBtn.className = 'text-xs font-bold text-primary hover:underline shrink-0';
+      }
     }
 
     const nameInput = document.getElementById('profile-dealer-name');
@@ -3347,7 +3743,7 @@ tailwind.config = {
         document.getElementById('profile-new-password').value = '';
         document.getElementById('profile-confirm-password').value = '';
         closeChangePasswordModal();
-        showProfileFeedback('profile-cred-feedback', 'Password updated successfully!', false);
+        showProfileFeedback('profile-cred-feedback', 'Password updated in SQLite database!', false);
         await fetchState();
       } else {
         showProfileFeedback('modal-password-feedback', data.detail || 'Failed to update password.', true);
@@ -3369,9 +3765,13 @@ tailwind.config = {
   }
 
   // Initialize on page load
-  window.addEventListener('DOMContentLoaded', () => {
+  window.addEventListener('DOMContentLoaded', async () => {
     renderUploadQueue();
-    fetchState();
+    await fetchState();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') === 'profile') {
+      switchTab('profile');
+    }
   });
 </script>
 </body>
