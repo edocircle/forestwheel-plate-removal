@@ -283,37 +283,53 @@ def create_review_app(
 
     active_user_id_ctx: ContextVar[int | None] = ContextVar("active_user_id_ctx", default=None)
 
+    def _is_guest_trial() -> bool:
+        uid = active_user_id_ctx.get()
+        if uid is not None:
+            return False
+        return review_dir_override is None or auth_db.count_users() > 0
+
+    def _use_scoped_dirs() -> bool:
+        uid = active_user_id_ctx.get()
+        if uid is not None:
+            return uid >= 2
+        return _is_guest_trial()
+
     def _user_data_root() -> Path:
         uid = active_user_id_ctx.get()
         if uid is not None and uid >= 2:
             d = base_data_root / "accounts_data" / f"user_{uid}"
             d.mkdir(parents=True, exist_ok=True)
             return d
+        if _is_guest_trial():
+            d = base_data_root / "accounts_data" / "guest_trial"
+            d.mkdir(parents=True, exist_ok=True)
+            return d
         return base_data_root
 
     review_dir = _ScopedPath(
         lambda: (_user_data_root() / "review")
-        if (active_user_id_ctx.get() or 0) >= 2
+        if _use_scoped_dirs()
         else base_review_dir
     )
     output_dir = _ScopedPath(
         lambda: (_user_data_root() / "output")
-        if (active_user_id_ctx.get() or 0) >= 2
+        if _use_scoped_dirs()
         else base_output_dir
     )
     inbox_dir = _ScopedPath(
         lambda: (_user_data_root() / "inbox")
-        if (active_user_id_ctx.get() or 0) >= 2
+        if _use_scoped_dirs()
         else base_inbox_dir
     )
     decisions_file = _ScopedPath(
         lambda: (_user_data_root() / "review_decisions.json")
-        if (active_user_id_ctx.get() or 0) >= 2
+        if _use_scoped_dirs()
         else base_decisions_file
     )
     state_file = _ScopedPath(
         lambda: (_user_data_root() / "processed_state.json")
-        if (active_user_id_ctx.get() or 0) >= 2
+        if _use_scoped_dirs()
         else base_state_file
     )
     cars_meta_file = _ScopedPath(lambda: _user_data_root() / "cars_metadata.json")
@@ -587,6 +603,80 @@ def create_review_app(
         openapi_url=None,
     )
 
+    def _ensure_guest_sample_seeded() -> None:
+        """Ensure the Guest Trial workspace has a sample vehicle in Gallery and Frames for before/after & frame editing trials."""
+        if not _is_guest_trial():
+            return
+        sample_cid = "SAMPLE-TRIAL"
+        sample_fname = "01_front_sedan.jpg"
+        out_img = output_dir / sample_cid / sample_fname
+        inbox_img = inbox_dir / sample_cid / sample_fname
+        if out_img.exists() and inbox_img.exists():
+            return
+
+        src_sample = Path(paths_cfg.get("input_dir", "data/test_photos")) / sample_fname
+        if src_sample.exists():
+            bgr = load_image_bgr(src_sample)
+        else:
+            bgr = np.full((640, 960, 3), (235, 232, 228), dtype=np.uint8)
+            cv2.rectangle(bgr, (0, 460), (960, 640), (195, 192, 188), -1)
+            cv2.rectangle(bgr, (180, 220), (780, 480), (42, 68, 120), -1)
+            cv2.rectangle(bgr, (250, 140), (710, 240), (55, 85, 145), -1)
+            cv2.rectangle(bgr, (350, 405), (610, 465), (248, 248, 248), -1)
+            cv2.rectangle(bgr, (350, 405), (610, 465), (30, 30, 30), 3)
+            cv2.putText(
+                bgr,
+                "SGP 8888 T",
+                (372, 446),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.05,
+                (20, 20, 20),
+                3,
+                cv2.LINE_AA,
+            )
+
+        inbox_img.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(inbox_img), bgr)
+
+        h, w = bgr.shape[:2]
+        dets = _get_detector().detect_array(bgr)
+        high_dets = [d for d in dets if d.confidence >= 0.40]
+        if not high_dets:
+            from .detect import Detection
+
+            high_dets = [
+                Detection(
+                    bbox=(int(w * 0.36), int(h * 0.62), int(w * 0.64), int(h * 0.74)),
+                    confidence=0.96,
+                )
+            ]
+
+        ov_res = apply_plate_overlays(bgr, high_dets, settings, overlay_bgra)
+        covered_bgr = ov_res.image_bgr
+
+        cache_file = output_dir / "_covered_cache" / sample_cid / sample_fname
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(cache_file), covered_bgr)
+
+        all_meta = _load_json_dict(cars_meta_file)
+        if sample_cid not in all_meta:
+            all_meta[sample_cid] = {
+                "plate_display": "SGP 8888 T (Sample)",
+                "car_model": "2024 Porsche 911 Carrera S (Sample Trial)",
+                "car_price": "S$ 428,800",
+                "car_specs": "Sample Trial Photo • Toggle Original vs Plate Removed",
+                "masking_style": "clean_blank",
+                "is_sample": True,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _save_json_dict(cars_meta_file, all_meta)
+
+        framed_pil = _render_with_active_frame_config(covered_bgr, car_id=sample_cid)
+        out_img.parent.mkdir(parents=True, exist_ok=True)
+        framed_pil.convert("RGB").save(
+            out_img, format="JPEG", quality=jpeg_quality, subsampling=0
+        )
+
     @app.middleware("http")
     async def bind_account_session_middleware(request: Request, call_next: Any) -> Response:
         """Bind every incoming HTTP request across Upload, Gallery, Frames, and Profile to the active account session."""
@@ -601,6 +691,8 @@ def create_review_app(
                 if custom_overlay_file.exists()
                 else default_overlay_bgra
             )
+            if _is_guest_trial():
+                _ensure_guest_sample_seeded()
             return await call_next(request)
         finally:
             active_user_id_ctx.reset(ctx_token)
@@ -1269,6 +1361,8 @@ def create_review_app(
         raw["updated_at"] = datetime.now(timezone.utc).isoformat()
         _save_json_dict(user_profile_file, raw)
         active_user_id_ctx.set(None)
+        if _is_guest_trial():
+            _ensure_guest_sample_seeded()
         resp = JSONResponse(content={"ok": True, "profile": _get_user_profile(None)})
         resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
         return resp

@@ -865,6 +865,24 @@ def test_session_binding_across_upload_gallery_frames_and_profile(tmp_path: Path
     assert "SKL-2222-B" not in state1_restored["cars_review"]
     assert "SKL-2222-B" not in state1_restored["cars_output"]
 
+    # 4. Sign out -> Guest Trial mode opens Upload, Gallery, and Frames with the built-in SAMPLE-TRIAL car
+    client.post("/api/profile/logout")
+    guest_state = client.get("/api/state").json()
+    assert guest_state["profile"]["is_logged_in"] is False
+    assert "SAMPLE-TRIAL" in guest_state["cars_output"]
+    assert "SLR-1111-A" not in guest_state["cars_output"]
+    assert "SKL-2222-B" not in guest_state["cars_output"]
+
+    # Verify Before (original) and After (plate removed) and Frame Studio render work for SAMPLE-TRIAL
+    before_resp = client.get("/media/original/SAMPLE-TRIAL/01_front_sedan.jpg")
+    assert before_resp.status_code == 200
+    after_resp = client.get("/media/output/SAMPLE-TRIAL/01_front_sedan.jpg")
+    assert after_resp.status_code == 200
+    studio_resp = client.get(
+        "/api/frame-render?car_id=SAMPLE-TRIAL&filename=01_front_sedan.jpg&ratio=1:1&template_style=rounded_card"
+    )
+    assert studio_resp.status_code == 200
+
 
 
 

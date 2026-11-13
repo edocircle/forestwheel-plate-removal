@@ -1515,22 +1515,29 @@ tailwind.config = {
     profile: 'Profile & Dealership Settings'
   };
 
-  // Switch between the 4 primary tabs: Upload, Gallery, Frames, Profile (All bound to account login)
+  // Switch between the 4 primary tabs: Upload, Gallery, Frames open freely (with Sample Trial when signed out); Profile opens Sign-In when signed out
   function switchTab(tab) {
     activeTab = tab;
     const isLoggedIn = Boolean(appState && appState.profile && appState.profile.is_logged_in);
+    const showAuthGate = (tab === 'profile' && !isLoggedIn);
 
     const authView = document.getElementById('profile-auth-view');
-    if (authView) authView.classList.toggle('hidden', isLoggedIn);
+    if (authView) authView.classList.toggle('hidden', !showAuthGate);
 
     const tabPill = document.getElementById('auth-target-tab-pill');
     if (tabPill) {
-      tabPill.textContent = `${TAB_DISPLAY_NAMES[tab] || 'Workspace'} • Account Session Required`;
+      tabPill.textContent = 'Profile & Dealership Workspace';
     }
 
     ['upload', 'gallery', 'frames', 'profile'].forEach(t => {
       const sec = document.getElementById('screen-' + t);
-      if (sec) sec.classList.toggle('hidden', !isLoggedIn || t !== tab);
+      if (sec) {
+        if (t === 'profile') {
+          sec.classList.toggle('hidden', tab !== 'profile' || !isLoggedIn);
+        } else {
+          sec.classList.toggle('hidden', t !== tab);
+        }
+      }
 
       const deskBtn = document.getElementById('nav-desk-' + t);
       if (deskBtn) {
@@ -1549,7 +1556,7 @@ tailwind.config = {
       }
     });
 
-    if (!isLoggedIn) {
+    if (showAuthGate) {
       document.getElementById('selection-floating-bar')?.classList.add('hidden');
       const hasAcct = Boolean(appState && appState.profile && appState.profile.has_account);
       setProfileAuthMode(hasAcct ? 'signin' : 'signup');
@@ -3527,20 +3534,13 @@ tailwind.config = {
         credentials: 'same-origin'
       });
       if (res.ok) {
-        const data = await res.json();
         uploadFilesQueue = [];
         studioCarId = null;
         studioFilename = null;
         selectedPhotoKeys.clear();
         selectedCarIds.clear();
-        appState.cars_output = {};
-        appState.cars_review = {};
-        appState.cars_meta = {};
-        appState.profile = data.profile;
         renderUploadQueue();
-        updateGalleryCountBadge();
-        syncUiWithProfile(data.profile);
-        populateProfilePage();
+        await fetchState();
         refreshBrandLogoImages();
         switchTab(activeTab);
       }
