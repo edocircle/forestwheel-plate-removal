@@ -663,6 +663,68 @@ def test_user_profile_brand_logo_and_credentials_update(tmp_path: Path) -> None:
     assert del_logo.json()["has_custom_logo"] is False
 
 
+def test_profile_signup_signin_google_and_password_change_without_username(tmp_path: Path) -> None:
+    """Verify Profile account creation, email/password sign-in, Google email logon, logout, and password-only update."""
+    client, _, _, _ = _setup_review_fixture(tmp_path)
+
+    # 1. Create account with email & password
+    reg_resp = client.post(
+        "/api/profile/register",
+        json={
+            "email": "dealer@forestwheel.com",
+            "password": "initial-pass",
+            "confirm_password": "initial-pass",
+        },
+    )
+    assert reg_resp.status_code == 200
+    prof = reg_resp.json()["profile"]
+    assert prof["is_logged_in"] is True
+    assert prof["email"] == "dealer@forestwheel.com"
+    assert prof["auth_provider"] == "email"
+
+    # 2. Change password without sending new_username
+    pw_resp = client.post(
+        "/api/profile/credentials",
+        json={
+            "current_password": "initial-pass",
+            "new_password": "updated-pass",
+            "confirm_password": "updated-pass",
+        },
+    )
+    assert pw_resp.status_code == 200
+
+    # 3. Sign out
+    out_resp = client.post("/api/profile/logout")
+    assert out_resp.status_code == 200
+    assert out_resp.json()["profile"]["is_logged_in"] is False
+
+    # 4. Sign in with old password fails; sign in with new password succeeds
+    bad_login = client.post(
+        "/api/profile/login",
+        json={"email": "dealer@forestwheel.com", "password": "initial-pass"},
+    )
+    assert bad_login.status_code == 400
+
+    good_login = client.post(
+        "/api/profile/login",
+        json={"email": "dealer@forestwheel.com", "password": "updated-pass"},
+    )
+    assert good_login.status_code == 200
+    assert good_login.json()["profile"]["is_logged_in"] is True
+
+    # 5. Connect / Sign in with Google email logon
+    google_resp = client.post(
+        "/api/profile/google-login",
+        json={"email": "owner@gmail.com"},
+    )
+    assert google_resp.status_code == 200
+    g_prof = google_resp.json()["profile"]
+    assert g_prof["is_logged_in"] is True
+    assert g_prof["email"] == "owner@gmail.com"
+    assert g_prof["auth_provider"] == "google"
+
+
+
 
 
 

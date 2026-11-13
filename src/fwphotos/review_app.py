@@ -282,19 +282,33 @@ def create_review_app(
         return None
 
     def _get_user_profile() -> dict[str, Any]:
-        """Return public-safe Dealership & User Profile settings."""
+        """Return public-safe Dealership & User Profile settings including Profile auth state."""
         environ = os.environ if env is None else env
         default_user = environ.get(user_env_key, "admin") or "admin"
         raw = _load_json_dict(user_profile_file)
+        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
+        logged_in_email = str(raw.get("logged_in_email", "")).strip()
+        is_logged_in = bool(raw.get("is_logged_in", False) and logged_in_email)
+        active_acct = accounts.get(logged_in_email.lower(), {}) if logged_in_email else {}
+        auth_provider = str(active_acct.get("auth_provider") or raw.get("auth_provider") or "email")
+        has_acct_pw = bool(
+            (active_acct.get("password_hash") and active_acct.get("password_salt"))
+            or (raw.get("password_hash") and raw.get("password_salt"))
+        )
         return {
-            "username": str(raw.get("username") or default_user),
+            "username": str(logged_in_email or raw.get("username") or default_user),
+            "email": logged_in_email or str(raw.get("email", "")),
+            "auth_provider": auth_provider,
+            "is_logged_in": is_logged_in,
+            "has_account": bool(accounts or has_acct_pw),
+            "google_client_id": str(environ.get("FW_GOOGLE_CLIENT_ID", "")),
             "dealer_name": str(raw.get("dealer_name", "Forest Wheel")),
             "dealer_tagline": str(raw.get("dealer_tagline", "Plate Removal Studio")),
             "default_specs": str(raw.get("default_specs", "Verified Pre-Owned • Singapore")),
             "currency_prefix": str(raw.get("currency_prefix", "S$")),
             "show_logo_watermark": bool(raw.get("show_logo_watermark", False)),
             "has_custom_logo": custom_logo_file.exists(),
-            "has_custom_credentials": bool(raw.get("password_hash") and raw.get("password_salt")),
+            "has_custom_credentials": has_acct_pw,
             "updated_at": str(raw.get("updated_at", "")),
         }
 
@@ -367,8 +381,21 @@ def create_review_app(
         return detector_instance
 
     def _verify_password_for_current_user(candidate_password: str) -> bool:
-        """Verify candidate_password against saved PBKDF2 hash or fallback environment variable."""
+        """Verify candidate_password against active signed-in account, saved PBKDF2 hash, or fallback env var."""
         raw_prof = _load_json_dict(user_profile_file)
+        accounts = raw_prof.get("accounts") if isinstance(raw_prof.get("accounts"), dict) else {}
+        logged_in_email = str(raw_prof.get("logged_in_email", "")).strip().lower()
+        if logged_in_email and logged_in_email in accounts:
+            acct = accounts[logged_in_email]
+            acct_hash = str(acct.get("password_hash", ""))
+            acct_salt = str(acct.get("password_salt", ""))
+            if acct_hash and acct_salt:
+                cand_hash = _hash_password(candidate_password, acct_salt)
+                return secrets.compare_digest(cand_hash.encode("utf-8"), acct_hash.encode("utf-8"))
+            # Google account without password yet allows setting a password
+            if acct.get("auth_provider") == "google" and not acct_hash:
+                return True
+
         saved_hash = str(raw_prof.get("password_hash", ""))
         saved_salt = str(raw_prof.get("password_salt", ""))
         if saved_hash and saved_salt:
@@ -663,14 +690,226 @@ def create_review_app(
             headers={"Cache-Control": "private, no-store"},
         )
 
+    @app.post("/api/profile/register")
+    def api_profile_register(
+        payload: dict[str, Any] = Body(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Create a new Profile account with email and password and sign in immediately."""
+        email = str(payload.get("email") or "").strip()
+        password = str(payload.get("password") or "")
+        confirm_password = str(payload.get("confirm_password") or password)
+
+        if not email or "@" not in email or "." not in email.split("@")[-1]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please enter a valid email address.",
+            )
+        if len(password) < 4:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 4 characters.",
+            )
+        if password != confirm_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password and confirmation do not match.",
+            )
+
+        raw = _load_json_dict(user_profile_file)
+        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
+        email_key = email.lower()
+        if email_key in accounts and accounts[email_key].get("password_hash"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An account with this email already exists. Please sign in.",
+            )
+
+        salt_hex = secrets.token_hex(16)
+        pw_hash = _hash_password(password, salt_hex)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        accounts[email_key] = {
+            "email": email,
+            "password_salt": salt_hex,
+            "password_hash": pw_hash,
+            "auth_provider": "email",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        raw["accounts"] = accounts
+        raw["email"] = email
+        raw["username"] = email
+        raw["logged_in_email"] = email
+        raw["is_logged_in"] = True
+        raw["auth_provider"] = "email"
+        raw["password_salt"] = salt_hex
+        raw["password_hash"] = pw_hash
+        raw["updated_at"] = now_iso
+        _save_json_dict(user_profile_file, raw)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "email": email,
+                "profile": _get_user_profile(),
+            }
+        )
+
+    @app.post("/api/profile/login")
+    def api_profile_login(
+        payload: dict[str, Any] = Body(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Sign in to the Profile page with email and password."""
+        email = str(payload.get("email") or "").strip()
+        password = str(payload.get("password") or "")
+        if not email or not password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please enter your email and password.",
+            )
+
+        raw = _load_json_dict(user_profile_file)
+        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
+        email_key = email.lower()
+
+        if email_key in accounts:
+            acct = accounts[email_key]
+            acct_hash = str(acct.get("password_hash", ""))
+            acct_salt = str(acct.get("password_salt", ""))
+            if not acct_hash or not acct_salt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This account uses Google Sign-In. Please click Continue with Google.",
+                )
+            cand_hash = _hash_password(password, acct_salt)
+            if not secrets.compare_digest(cand_hash.encode("utf-8"), acct_hash.encode("utf-8")):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid email or password.",
+                )
+            canonical_email = str(acct.get("email") or email)
+            raw["password_salt"] = acct_salt
+            raw["password_hash"] = acct_hash
+            raw["auth_provider"] = str(acct.get("auth_provider") or "email")
+        else:
+            # Check legacy single-user profile credentials if email matches username/email
+            saved_hash = str(raw.get("password_hash", ""))
+            saved_salt = str(raw.get("password_salt", ""))
+            saved_user = str(raw.get("email") or raw.get("username") or "").strip().lower()
+            if saved_hash and saved_salt and saved_user == email_key:
+                cand_hash = _hash_password(password, saved_salt)
+                if not secrets.compare_digest(cand_hash.encode("utf-8"), saved_hash.encode("utf-8")):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid email or password.",
+                    )
+                canonical_email = email
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No account found for this email. Please create an account first.",
+                )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        raw["email"] = canonical_email
+        raw["username"] = canonical_email
+        raw["logged_in_email"] = canonical_email
+        raw["is_logged_in"] = True
+        raw["updated_at"] = now_iso
+        _save_json_dict(user_profile_file, raw)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "email": canonical_email,
+                "profile": _get_user_profile(),
+            }
+        )
+
+    @app.post("/api/profile/google-login")
+    def api_profile_google_login(
+        payload: dict[str, Any] = Body(...),
+        _user: str = Depends(verify_auth),
+    ) -> JSONResponse:
+        """Sign in or create an account via Google email logon."""
+        email = str(payload.get("email") or "").strip()
+        # Also support decoding email from a Google JWT credential if provided
+        credential = str(payload.get("credential") or "").strip()
+        if not email and credential and credential.count(".") == 2:
+            try:
+                import base64
+
+                b64_payload = credential.split(".")[1]
+                b64_payload += "=" * ((4 - len(b64_payload) % 4) % 4)
+                jwt_data = json.loads(base64.urlsafe_b64decode(b64_payload).decode("utf-8"))
+                email = str(jwt_data.get("email") or "").strip()
+            except Exception:  # noqa: BLE001
+                email = ""
+
+        if not email or "@" not in email or "." not in email.split("@")[-1]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please enter a valid Google email address.",
+            )
+
+        raw = _load_json_dict(user_profile_file)
+        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
+        email_key = email.lower()
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        existing = accounts.get(email_key, {})
+        accounts[email_key] = {
+            "email": email,
+            "password_salt": existing.get("password_salt", ""),
+            "password_hash": existing.get("password_hash", ""),
+            "auth_provider": "google",
+            "created_at": existing.get("created_at", now_iso),
+            "updated_at": now_iso,
+        }
+        raw["accounts"] = accounts
+        raw["email"] = email
+        raw["username"] = email
+        raw["logged_in_email"] = email
+        raw["is_logged_in"] = True
+        raw["auth_provider"] = "google"
+        raw["updated_at"] = now_iso
+        _save_json_dict(user_profile_file, raw)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "email": email,
+                "profile": _get_user_profile(),
+            }
+        )
+
+    @app.post("/api/profile/logout")
+    def api_profile_logout(_user: str = Depends(verify_auth)) -> JSONResponse:
+        """Sign out of the Profile page."""
+        raw = _load_json_dict(user_profile_file)
+        raw["is_logged_in"] = False
+        raw["logged_in_email"] = ""
+        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _save_json_dict(user_profile_file, raw)
+        return JSONResponse(content={"ok": True, "profile": _get_user_profile()})
+
     @app.post("/api/profile/credentials")
     def api_update_credentials(
         payload: dict[str, Any] = Body(...),
         _user: str = Depends(verify_auth),
     ) -> JSONResponse:
-        """Verify current password and update login username and/or PBKDF2-HMAC-SHA256 hashed password."""
+        """Verify current password and update PBKDF2-HMAC-SHA256 hashed password."""
         current_password = str(payload.get("current_password") or "")
-        new_username = str(payload.get("new_username") or "").strip()
+        raw = _load_json_dict(user_profile_file)
+        cur_prof = _get_user_profile()
+        new_username = str(
+            payload.get("new_username")
+            or raw.get("logged_in_email")
+            or raw.get("email")
+            or raw.get("username")
+            or cur_prof["username"]
+        ).strip()
         new_password = str(payload.get("new_password") or "")
         confirm_password = str(payload.get("confirm_password") or "")
 
@@ -678,12 +917,6 @@ def create_review_app(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Current password is incorrect.",
-            )
-
-        if not new_username:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username cannot be empty.",
             )
 
         if new_password:
@@ -703,12 +936,20 @@ def create_review_app(
 
         salt_hex = secrets.token_hex(16)
         pw_hash = _hash_password(effective_password, salt_hex)
+        now_iso = datetime.now(timezone.utc).isoformat()
 
-        raw = _load_json_dict(user_profile_file)
+        accounts = raw.get("accounts") if isinstance(raw.get("accounts"), dict) else {}
+        logged_in_email = str(raw.get("logged_in_email") or "").strip()
+        if logged_in_email and logged_in_email.lower() in accounts:
+            accounts[logged_in_email.lower()]["password_salt"] = salt_hex
+            accounts[logged_in_email.lower()]["password_hash"] = pw_hash
+            accounts[logged_in_email.lower()]["updated_at"] = now_iso
+            raw["accounts"] = accounts
+
         raw["username"] = new_username
         raw["password_salt"] = salt_hex
         raw["password_hash"] = pw_hash
-        raw["updated_at"] = datetime.now(timezone.utc).isoformat()
+        raw["updated_at"] = now_iso
         _save_json_dict(user_profile_file, raw)
 
         return JSONResponse(

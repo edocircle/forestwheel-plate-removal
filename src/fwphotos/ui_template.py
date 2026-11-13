@@ -708,197 +708,415 @@ tailwind.config = {
 <!-- SCREEN 4: PROFILE & DEALERSHIP SETTINGS                                   -->
 <!-- ========================================================================= -->
 <main id="screen-profile" class="hidden max-w-7xl mx-auto px-4 sm:px-8 pt-6 sm:pt-10">
-  <div class="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-    <div>
-      <h1 class="text-2xl sm:text-4xl font-bold tracking-tight text-on-surface">Profile &amp; Dealership Settings</h1>
-      <p class="text-sm sm:text-base text-on-surface-variant mt-1">Manage your dealership brand logo, watermark defaults, and account credentials.</p>
-    </div>
-  </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
-    <!-- Left Column: Brand Logo + Dealership Identity -->
-    <div class="lg:col-span-7 space-y-6">
-      <!-- Card 1: Dealership Brand Logo & Watermark -->
-      <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2.5">
-            <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
-              <span class="material-symbols-outlined text-[20px]">verified</span>
-            </div>
-            <div>
-              <h2 class="text-base font-bold text-on-surface">Dealership Brand Logo</h2>
-              <p class="text-xs text-on-surface-variant">Displayed in the top navigation bar and optional frame watermark badge.</p>
-            </div>
-          </div>
-          <span id="profile-logo-custom-badge" class="hidden text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">Custom Logo Active</span>
+  <!-- 4A. SIGN IN / CREATE ACCOUNT GATE (Shown when not signed in) -->
+  <div id="profile-auth-view" class="max-w-md mx-auto py-6 sm:py-12">
+    <div class="apple-card-white rounded-[28px] p-7 sm:p-9 space-y-6 border border-outline-variant/30">
+      <!-- Top Icon & Title -->
+      <div class="text-center space-y-2">
+        <div class="w-14 h-14 rounded-2xl bg-primary-fixed text-primary mx-auto flex items-center justify-center shadow-sm">
+          <span class="material-symbols-outlined text-3xl">account_circle</span>
         </div>
-
-        <input id="profile-logo-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/*" class="hidden" onchange="uploadBrandLogo(this.files)"/>
-
-        <div class="flex flex-col sm:flex-row items-center gap-5 p-4 rounded-2xl bg-surface border border-outline-variant/30">
-          <!-- Checkered Preview Box -->
-          <div class="w-32 h-24 rounded-xl bg-white border border-outline-variant/40 flex items-center justify-center p-3 shadow-inner shrink-0">
-            <img id="profile-logo-preview-img" src="/media/brand-logo" alt="Dealership Logo Preview" class="max-h-full max-w-full object-contain"/>
-          </div>
-          <div class="flex-1 space-y-3 text-center sm:text-left">
-            <p class="text-xs text-on-surface-variant">Recommended: Transparent PNG or WebP (at least 300×120 px). Automatically scaled for header &amp; frame watermark.</p>
-            <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
-              <button type="button" onclick="document.getElementById('profile-logo-file-input').click()"
-                      class="px-4 py-2 rounded-xl bg-primary hover:bg-primary-container text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
-                <span class="material-symbols-outlined text-[16px]">upload</span>
-                <span>Upload Logo</span>
-              </button>
-              <button type="button" onclick="resetBrandLogo()"
-                      class="px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant text-xs font-semibold transition-all flex items-center gap-1">
-                <span class="material-symbols-outlined text-[16px]">restart_alt</span>
-                <span>Reset to Default</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Show Watermark Toggle -->
-        <label class="flex items-center justify-between p-4 rounded-2xl bg-surface border border-outline-variant/25 cursor-pointer hover:border-primary/40 transition-all">
-          <div class="pr-4">
-            <span class="text-sm font-semibold text-on-surface block">Show Logo Badge on Framed Photos</span>
-            <span class="text-xs text-on-surface-variant">Automatically places a clean frosted dealership logo badge in the top-right corner of exported &amp; processed photos.</span>
-          </div>
-          <input id="profile-watermark-toggle" type="checkbox" onchange="saveProfileSettings()" class="w-5 h-5 rounded text-primary focus:ring-primary"/>
-        </label>
+        <h1 id="auth-card-title" class="text-2xl font-bold tracking-tight text-on-surface">Sign in to Profile</h1>
+        <p id="auth-card-subtitle" class="text-xs sm:text-sm text-on-surface-variant">Sign in or create an account to manage dealership branding and security settings.</p>
       </div>
 
-      <!-- Card 2: Dealership Identity & Listing Defaults -->
-      <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
-        <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
-            <span class="material-symbols-outlined text-[20px]">storefront</span>
-          </div>
-          <div>
-            <h2 class="text-base font-bold text-on-surface">Dealership Identity &amp; Defaults</h2>
-            <p class="text-xs text-on-surface-variant">Customize your workspace title and default listing caption specs.</p>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Dealership / Brand Name</label>
-            <input id="profile-dealer-name" type="text" placeholder="Forest Wheel"
-                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm font-semibold text-on-surface focus:outline-none focus:border-primary"/>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Header Tagline Badge</label>
-            <input id="profile-dealer-tagline" type="text" placeholder="Plate Studio"
-                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div class="sm:col-span-2">
-            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Default Subtitle / Specs Text</label>
-            <input id="profile-default-specs" type="text" placeholder="e.g. Certified Pre-Owned • Low Mileage"
-                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Currency Prefix</label>
-            <input id="profile-currency-prefix" type="text" placeholder="S$"
-                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm font-semibold text-on-surface focus:outline-none focus:border-primary"/>
-          </div>
-        </div>
-
-        <div class="pt-1 flex items-center justify-between gap-4">
-          <p id="profile-brand-feedback" class="text-xs font-semibold text-emerald-700 hidden"></p>
-          <button type="button" onclick="saveProfileSettings()"
-                  class="ml-auto px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-1.5">
-            <span class="material-symbols-outlined text-[17px]">save</span>
-            <span>Save Brand Settings</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Right Column: Account Security + Workspace Overview -->
-    <div class="lg:col-span-5 space-y-6">
-      <!-- Card 3: Account & Password Security -->
-      <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
-        <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
-            <span class="material-symbols-outlined text-[20px]">lock</span>
-          </div>
-          <div>
-            <h2 class="text-base font-bold text-on-surface">Account &amp; Password</h2>
-            <p class="text-xs text-on-surface-variant">Update your administrator username and login password.</p>
-          </div>
-        </div>
-
-        <div class="space-y-3.5">
-          <div>
-            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Username</label>
-            <input id="profile-username-input" type="text" autocomplete="username"
-                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm font-semibold text-on-surface focus:outline-none focus:border-primary"/>
-          </div>
-
-          <div>
-            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Current Password <span class="text-error">*</span></label>
-            <input id="profile-current-password" type="password" autocomplete="current-password" placeholder="Required to confirm changes"
-                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
-          </div>
-
-          <div class="pt-1 border-t border-surface-container">
-            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">New Password <span class="text-[10px] font-normal text-outline">(leave blank to keep current)</span></label>
-            <input id="profile-new-password" type="password" autocomplete="new-password" placeholder="Minimum 6 characters"
-                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
-          </div>
-
-          <div>
-            <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Confirm New Password</label>
-            <input id="profile-confirm-password" type="password" autocomplete="new-password" placeholder="Re-enter new password"
-                   class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
-          </div>
-        </div>
-
-        <p id="profile-cred-feedback" class="text-xs font-semibold hidden"></p>
-
-        <button type="button" onclick="saveProfileCredentials()"
-                class="w-full py-3 rounded-xl bg-on-surface hover:opacity-90 text-white font-semibold text-xs shadow-sm transition-all flex items-center justify-center gap-1.5">
-          <span class="material-symbols-outlined text-[17px]">key</span>
-          <span>Update Credentials</span>
+      <!-- Segmented Control: Sign In vs Create Account -->
+      <div class="grid grid-cols-2 bg-surface-container p-1 rounded-2xl">
+        <button type="button" id="auth-tab-signin" onclick="setProfileAuthMode('signin')"
+                class="py-2 rounded-xl text-xs font-bold bg-white text-on-surface shadow-sm transition-all">
+          Sign In
+        </button>
+        <button type="button" id="auth-tab-signup" onclick="setProfileAuthMode('signup')"
+                class="py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all">
+          Create Account
         </button>
       </div>
 
-      <!-- Card 4: Workspace Overview -->
-      <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-4">
-        <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 rounded-xl bg-surface-container text-on-surface-variant flex items-center justify-center">
-            <span class="material-symbols-outlined text-[20px]">analytics</span>
-          </div>
-          <div>
-            <h2 class="text-base font-bold text-on-surface">Workspace Overview</h2>
-            <p class="text-xs text-on-surface-variant">Live inventory &amp; template summary.</p>
-          </div>
+      <!-- Continue with Google Email Logon Button -->
+      <button type="button" onclick="openGoogleLoginModal()"
+              class="w-full py-3 px-4 rounded-2xl bg-white hover:bg-surface border border-outline-variant/50 text-on-surface font-semibold text-xs sm:text-sm shadow-sm transition-all flex items-center justify-center gap-2.5">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.8-5.5 3.8-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 6.6 2.2 2.2 6.6 2.2 12S6.6 21.8 12 21.8c6.9 0 9.6-4.8 9.6-7.3 0-.5-.1-.9-.1-1.3H12z"/>
+          <path fill="#34A853" d="M3.3 7.3l3.2 2.4C7.4 7.5 9.5 5.9 12 5.9c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 8.2 2.2 4.9 4.3 3.3 7.3z"/>
+          <path fill="#FBBC05" d="M12 21.8c2.6 0 4.8-.9 6.4-2.4l-3-2.5c-.8.6-1.9 1-3.4 1-2.5 0-4.7-1.7-5.5-4.1l-3.2 2.5c1.6 3.2 4.9 5.5 8.7 5.5z"/>
+          <path fill="#4285F4" d="M21.6 14.5c.1-.5.2-1.1.2-1.8 0-.6-.1-1.2-.2-1.7H12v3.9h5.5c-.3 1.3-1.1 2.4-2.1 3.1l3 2.5c1.8-1.6 3.2-4 3.2-6z"/>
+        </svg>
+        <span>Continue with Google</span>
+      </button>
+
+      <!-- Divider -->
+      <div class="relative flex items-center justify-center">
+        <div class="border-t border-outline-variant/30 w-full"></div>
+        <span class="bg-white px-3 text-[11px] font-medium text-outline uppercase tracking-wider shrink-0">or with email</span>
+        <div class="border-t border-outline-variant/30 w-full"></div>
+      </div>
+
+      <!-- Email & Password Form -->
+      <div class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Email Address</label>
+          <input id="auth-email-input" type="email" autocomplete="email" placeholder="you@company.com"
+                 class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
-            <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Car Groups</span>
-            <span id="stat-total-cars" class="text-2xl font-bold text-on-surface mt-0.5 block">0</span>
+        <div>
+          <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
+          <input id="auth-password-input" type="password" autocomplete="current-password" placeholder="Enter password"
+                 onkeydown="if(event.key==='Enter') submitProfileAuth();"
+                 class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+        </div>
+
+        <div id="auth-confirm-wrap" class="hidden">
+          <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Confirm Password</label>
+          <input id="auth-confirm-input" type="password" autocomplete="new-password" placeholder="Re-enter password"
+                 onkeydown="if(event.key==='Enter') submitProfileAuth();"
+                 class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+        </div>
+      </div>
+
+      <p id="profile-auth-feedback" class="text-xs font-semibold text-center hidden"></p>
+
+      <button type="button" id="auth-submit-btn" onclick="submitProfileAuth()"
+              class="w-full py-3 rounded-2xl bg-gradient-to-b from-primary-container to-primary hover:opacity-95 text-white font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2">
+        <span class="material-symbols-outlined text-[18px]">login</span>
+        <span id="auth-submit-label">Sign In</span>
+      </button>
+
+      <p class="text-xs text-center text-on-surface-variant">
+        <span id="auth-switch-prompt">Don't have an account?</span>
+        <button type="button" id="auth-switch-link" onclick="toggleProfileAuthMode()" class="font-bold text-primary hover:underline ml-1">
+          Create account
+        </button>
+      </p>
+    </div>
+  </div>
+
+  <!-- 4B. AUTHENTICATED PROFILE DASHBOARD (Shown once signed in) -->
+  <div id="profile-dashboard-view" class="hidden">
+    <div class="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div>
+        <h1 class="text-2xl sm:text-4xl font-bold tracking-tight text-on-surface">Profile &amp; Dealership Settings</h1>
+        <p class="text-sm sm:text-base text-on-surface-variant mt-1">Manage your dealership brand logo, watermark defaults, and account security.</p>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <span id="profile-signed-in-pill" class="px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold flex items-center gap-1.5 border border-emerald-200/60">
+          <span class="material-symbols-outlined text-[15px] material-fill">verified_user</span>
+          <span id="profile-signed-in-email">user@forestwheel.com</span>
+        </span>
+        <button type="button" onclick="logoutProfileAccount()"
+                class="px-3.5 py-1.5 rounded-full bg-surface-container hover:bg-error-container/60 text-on-surface-variant hover:text-error text-xs font-semibold transition-all flex items-center gap-1">
+          <span class="material-symbols-outlined text-[16px]">logout</span>
+          <span>Sign Out</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start">
+      <!-- Left Column: Brand Logo + Dealership Identity -->
+      <div class="lg:col-span-7 space-y-6">
+        <!-- Card 1: Dealership Brand Logo & Watermark -->
+        <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+                <span class="material-symbols-outlined text-[20px]">verified</span>
+              </div>
+              <div>
+                <h2 class="text-base font-bold text-on-surface">Dealership Brand Logo</h2>
+                <p class="text-xs text-on-surface-variant">Displayed in the top navigation bar and optional frame watermark badge.</p>
+              </div>
+            </div>
+            <span id="profile-logo-custom-badge" class="hidden text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">Custom Logo Active</span>
           </div>
-          <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
-            <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Ready Photos</span>
-            <span id="stat-ready-photos" class="text-2xl font-bold text-emerald-600 mt-0.5 block">0</span>
+
+          <input id="profile-logo-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/*" class="hidden" onchange="uploadBrandLogo(this.files)"/>
+
+          <div class="flex flex-col sm:flex-row items-center gap-5 p-4 rounded-2xl bg-surface border border-outline-variant/30">
+            <!-- Checkered Preview Box -->
+            <div class="w-32 h-24 rounded-xl bg-white border border-outline-variant/40 flex items-center justify-center p-3 shadow-inner shrink-0">
+              <img id="profile-logo-preview-img" src="/media/brand-logo" alt="Dealership Logo Preview" class="max-h-full max-w-full object-contain"/>
+            </div>
+            <div class="flex-1 space-y-3 text-center sm:text-left">
+              <p class="text-xs text-on-surface-variant">Recommended: Transparent PNG or WebP (at least 300×120 px). Automatically scaled for header &amp; frame watermark.</p>
+              <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
+                <button type="button" onclick="document.getElementById('profile-logo-file-input').click()"
+                        class="px-4 py-2 rounded-xl bg-primary hover:bg-primary-container text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
+                  <span class="material-symbols-outlined text-[16px]">upload</span>
+                  <span>Upload Logo</span>
+                </button>
+                <button type="button" onclick="resetBrandLogo()"
+                        class="px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant text-xs font-semibold transition-all flex items-center gap-1">
+                  <span class="material-symbols-outlined text-[16px]">restart_alt</span>
+                  <span>Reset to Default</span>
+                </button>
+              </div>
+            </div>
           </div>
-          <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
-            <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Needs Review</span>
-            <span id="stat-review-photos" class="text-2xl font-bold text-amber-600 mt-0.5 block">0</span>
+
+          <!-- Show Watermark Toggle -->
+          <label class="flex items-center justify-between p-4 rounded-2xl bg-surface border border-outline-variant/25 cursor-pointer hover:border-primary/40 transition-all">
+            <div class="pr-4">
+              <span class="text-sm font-semibold text-on-surface block">Show Logo Badge on Framed Photos</span>
+              <span class="text-xs text-on-surface-variant">Automatically places a clean frosted dealership logo badge in the top-right corner of exported &amp; processed photos.</span>
+            </div>
+            <input id="profile-watermark-toggle" type="checkbox" onchange="saveProfileSettings()" class="w-5 h-5 rounded text-primary focus:ring-primary"/>
+          </label>
+        </div>
+
+        <!-- Card 2: Dealership Identity & Listing Defaults -->
+        <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+              <span class="material-symbols-outlined text-[20px]">storefront</span>
+            </div>
+            <div>
+              <h2 class="text-base font-bold text-on-surface">Dealership Identity &amp; Defaults</h2>
+              <p class="text-xs text-on-surface-variant">Customize your workspace title and default listing caption specs.</p>
+            </div>
           </div>
-          <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
-            <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Active Frame</span>
-            <span id="stat-active-preset" class="text-sm font-bold text-primary mt-1.5 block truncate">1:1 • Fit</span>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Dealership / Brand Name</label>
+              <input id="profile-dealer-name" type="text" placeholder="Forest Wheel"
+                     class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm font-semibold text-on-surface focus:outline-none focus:border-primary"/>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Header Tagline Badge</label>
+              <input id="profile-dealer-tagline" type="text" placeholder="Plate Studio"
+                     class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Default Subtitle / Specs Text</label>
+              <input id="profile-default-specs" type="text" placeholder="e.g. Certified Pre-Owned • Low Mileage"
+                     class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Currency Prefix</label>
+              <input id="profile-currency-prefix" type="text" placeholder="S$"
+                     class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm font-semibold text-on-surface focus:outline-none focus:border-primary"/>
+            </div>
+          </div>
+
+          <div class="pt-1 flex items-center justify-between gap-4">
+            <p id="profile-brand-feedback" class="text-xs font-semibold text-emerald-700 hidden"></p>
+            <button type="button" onclick="saveProfileSettings()"
+                    class="ml-auto px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-[17px]">save</span>
+              <span>Save Brand Settings</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Account & Password Menu + Workspace Overview -->
+      <div class="lg:col-span-5 space-y-6">
+        <!-- Card 3: Account & Password Setup (Menu style, no Username input, no open password fields) -->
+        <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-5">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+              <span class="material-symbols-outlined text-[20px]">lock</span>
+            </div>
+            <div>
+              <h2 class="text-base font-bold text-on-surface">Account &amp; Password Setup</h2>
+              <p class="text-xs text-on-surface-variant">Manage your signed-in account and password security.</p>
+            </div>
+          </div>
+
+          <!-- Signed-in Email Summary Row -->
+          <div class="p-4 rounded-2xl bg-surface border border-outline-variant/30 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-9 h-9 rounded-full bg-primary-fixed/80 text-primary flex items-center justify-center font-bold text-xs shrink-0" id="profile-acct-avatar">
+                U
+              </div>
+              <div class="min-w-0">
+                <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Signed-in Email</span>
+                <span id="profile-acct-email-display" class="text-sm font-bold text-on-surface truncate block">user@forestwheel.com</span>
+              </div>
+            </div>
+            <span id="profile-acct-provider-badge" class="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-primary-fixed text-primary shrink-0">
+              Email
+            </span>
+          </div>
+
+          <!-- Menu Options List (Opens Change Password Menu Modal) -->
+          <div class="rounded-2xl bg-surface border border-outline-variant/30 divide-y divide-outline-variant/25 overflow-hidden">
+            <button type="button" onclick="openChangePasswordModal()"
+                    class="w-full px-4 py-3.5 hover:bg-surface-container/70 transition-all flex items-center justify-between text-left group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-white border border-outline-variant/30 flex items-center justify-center text-primary shadow-2xs">
+                  <span class="material-symbols-outlined text-[18px]">key</span>
+                </div>
+                <div>
+                  <span class="text-sm font-semibold text-on-surface block">Change Password</span>
+                  <span class="text-[11px] text-on-surface-variant">Update your account login password</span>
+                </div>
+              </div>
+              <span class="material-symbols-outlined text-[20px] text-outline group-hover:text-on-surface group-hover:translate-x-0.5 transition-all">chevron_right</span>
+            </button>
+
+            <button type="button" onclick="logoutProfileAccount()"
+                    class="w-full px-4 py-3.5 hover:bg-error-container/30 transition-all flex items-center justify-between text-left group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-white border border-outline-variant/30 flex items-center justify-center text-error shadow-2xs">
+                  <span class="material-symbols-outlined text-[18px]">logout</span>
+                </div>
+                <div>
+                  <span class="text-sm font-semibold text-error block">Sign Out</span>
+                  <span class="text-[11px] text-on-surface-variant">Return to Profile sign-in screen</span>
+                </div>
+              </div>
+              <span class="material-symbols-outlined text-[20px] text-outline group-hover:text-error transition-all">chevron_right</span>
+            </button>
+          </div>
+
+          <p id="profile-cred-feedback" class="text-xs font-semibold hidden"></p>
+        </div>
+
+        <!-- Card 4: Workspace Overview -->
+        <div class="apple-card-white rounded-[24px] p-6 sm:p-8 space-y-4">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-surface-container text-on-surface-variant flex items-center justify-center">
+              <span class="material-symbols-outlined text-[20px]">analytics</span>
+            </div>
+            <div>
+              <h2 class="text-base font-bold text-on-surface">Workspace Overview</h2>
+              <p class="text-xs text-on-surface-variant">Live inventory &amp; template summary.</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
+              <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Car Groups</span>
+              <span id="stat-total-cars" class="text-2xl font-bold text-on-surface mt-0.5 block">0</span>
+            </div>
+            <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
+              <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Ready Photos</span>
+              <span id="stat-ready-photos" class="text-2xl font-bold text-emerald-600 mt-0.5 block">0</span>
+            </div>
+            <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
+              <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Needs Review</span>
+              <span id="stat-review-photos" class="text-2xl font-bold text-amber-600 mt-0.5 block">0</span>
+            </div>
+            <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant/25">
+              <span class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider block">Active Frame</span>
+              <span id="stat-active-preset" class="text-sm font-bold text-primary mt-1.5 block truncate">1:1 • Fit</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
   </div>
 </main>
+
+<!-- ========================================================================= -->
+<!-- CHANGE PASSWORD MODAL MENU                                                -->
+<!-- ========================================================================= -->
+<div id="change-password-modal" class="fixed inset-0 z-50 hidden bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="bg-white rounded-[28px] max-w-md w-full p-6 sm:p-7 space-y-5 shadow-apple-float border border-outline-variant/30">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-primary-fixed text-primary flex items-center justify-center">
+          <span class="material-symbols-outlined text-[20px]">key</span>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-on-surface">Change Password</h3>
+          <p class="text-xs text-on-surface-variant">Enter your current and new password below.</p>
+        </div>
+      </div>
+      <button type="button" onclick="closeChangePasswordModal()" class="w-8 h-8 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface">
+        <span class="material-symbols-outlined text-[18px]">close</span>
+      </button>
+    </div>
+
+    <div class="space-y-3.5">
+      <div>
+        <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Current Password <span class="text-error">*</span></label>
+        <input id="profile-current-password" type="password" autocomplete="current-password" placeholder="Enter current password"
+               class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">New Password <span class="text-error">*</span></label>
+        <input id="profile-new-password" type="password" autocomplete="new-password" placeholder="Minimum 4 characters"
+               class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Confirm New Password <span class="text-error">*</span></label>
+        <input id="profile-confirm-password" type="password" autocomplete="new-password" placeholder="Re-enter new password"
+               onkeydown="if(event.key==='Enter') saveProfileCredentials();"
+               class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+      </div>
+    </div>
+
+    <p id="modal-password-feedback" class="text-xs font-semibold hidden"></p>
+
+    <div class="flex items-center justify-end gap-2.5 pt-2">
+      <button type="button" onclick="closeChangePasswordModal()"
+              class="px-4 py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant text-xs font-semibold transition-all">
+        Cancel
+      </button>
+      <button type="button" onclick="saveProfileCredentials()"
+              class="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
+        <span class="material-symbols-outlined text-[16px]">check</span>
+        <span>Update Password</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- GOOGLE EMAIL LOGON MODAL                                                  -->
+<!-- ========================================================================= -->
+<div id="google-login-modal" class="fixed inset-0 z-50 hidden bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="bg-white rounded-[28px] max-w-md w-full p-6 sm:p-7 space-y-5 shadow-apple-float border border-outline-variant/30">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-surface border border-outline-variant/40 flex items-center justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.8-5.5 3.8-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 6.6 2.2 2.2 6.6 2.2 12S6.6 21.8 12 21.8c6.9 0 9.6-4.8 9.6-7.3 0-.5-.1-.9-.1-1.3H12z"/>
+            <path fill="#34A853" d="M3.3 7.3l3.2 2.4C7.4 7.5 9.5 5.9 12 5.9c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 8.2 2.2 4.9 4.3 3.3 7.3z"/>
+            <path fill="#FBBC05" d="M12 21.8c2.6 0 4.8-.9 6.4-2.4l-3-2.5c-.8.6-1.9 1-3.4 1-2.5 0-4.7-1.7-5.5-4.1l-3.2 2.5c1.6 3.2 4.9 5.5 8.7 5.5z"/>
+            <path fill="#4285F4" d="M21.6 14.5c.1-.5.2-1.1.2-1.8 0-.6-.1-1.2-.2-1.7H12v3.9h5.5c-.3 1.3-1.1 2.4-2.1 3.1l3 2.5c1.8-1.6 3.2-4 3.2-6z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-on-surface">Sign in with Google</h3>
+          <p class="text-xs text-on-surface-variant">Connect your Google email to access Profile settings.</p>
+        </div>
+      </div>
+      <button type="button" onclick="closeGoogleLoginModal()" class="w-8 h-8 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-on-surface">
+        <span class="material-symbols-outlined text-[18px]">close</span>
+      </button>
+    </div>
+
+    <div>
+      <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">Google Email Address</label>
+      <input id="google-email-input" type="email" autocomplete="email" placeholder="yourname@gmail.com"
+             onkeydown="if(event.key==='Enter') submitGoogleEmailLogin();"
+             class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+    </div>
+
+    <p id="google-login-feedback" class="text-xs font-semibold text-error hidden"></p>
+
+    <div class="flex items-center justify-end gap-2.5 pt-1">
+      <button type="button" onclick="closeGoogleLoginModal()"
+              class="px-4 py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant text-xs font-semibold transition-all">
+        Cancel
+      </button>
+      <button type="button" onclick="submitGoogleEmailLogin()"
+              class="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
+        <span>Continue</span>
+        <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+      </button>
+    </div>
+  </div>
+</div>
 
 <!-- ========================================================================= -->
 <!-- CAR GROUP EXPANDED MODAL (ALL PHOTOS + BEFORE/AFTER TOGGLE + EDIT/DELETE) -->
@@ -2762,6 +2980,169 @@ tailwind.config = {
   // =========================================================================
   // SCREEN 4: PROFILE & DEALERSHIP SETTINGS LOGIC
   // =========================================================================
+  let profileAuthMode = 'signin';
+
+  function setProfileAuthMode(mode) {
+    profileAuthMode = (mode === 'signup') ? 'signup' : 'signin';
+    const isSignup = profileAuthMode === 'signup';
+
+    const tabSignin = document.getElementById('auth-tab-signin');
+    const tabSignup = document.getElementById('auth-tab-signup');
+    if (tabSignin && tabSignup) {
+      tabSignin.className = !isSignup
+        ? 'py-2 rounded-xl text-xs font-bold bg-white text-on-surface shadow-sm transition-all'
+        : 'py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all';
+      tabSignup.className = isSignup
+        ? 'py-2 rounded-xl text-xs font-bold bg-white text-on-surface shadow-sm transition-all'
+        : 'py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all';
+    }
+
+    const titleEl = document.getElementById('auth-card-title');
+    if (titleEl) titleEl.textContent = isSignup ? 'Create Profile Account' : 'Sign in to Profile';
+
+    const confirmWrap = document.getElementById('auth-confirm-wrap');
+    if (confirmWrap) confirmWrap.classList.toggle('hidden', !isSignup);
+
+    const submitLabel = document.getElementById('auth-submit-label');
+    if (submitLabel) submitLabel.textContent = isSignup ? 'Create Account' : 'Sign In';
+
+    const switchPrompt = document.getElementById('auth-switch-prompt');
+    if (switchPrompt) switchPrompt.textContent = isSignup ? 'Already have an account?' : "Don't have an account?";
+
+    const switchLink = document.getElementById('auth-switch-link');
+    if (switchLink) switchLink.textContent = isSignup ? 'Sign in' : 'Create account';
+
+    const fb = document.getElementById('profile-auth-feedback');
+    if (fb) fb.classList.add('hidden');
+  }
+
+  function toggleProfileAuthMode() {
+    setProfileAuthMode(profileAuthMode === 'signin' ? 'signup' : 'signin');
+  }
+
+  async function submitProfileAuth() {
+    const email = (document.getElementById('auth-email-input')?.value || '').trim();
+    const password = document.getElementById('auth-password-input')?.value || '';
+    const confirmPassword = document.getElementById('auth-confirm-input')?.value || '';
+
+    if (!email || !email.includes('@')) {
+      showProfileFeedback('profile-auth-feedback', 'Please enter a valid email address.', true);
+      return;
+    }
+    if (!password) {
+      showProfileFeedback('profile-auth-feedback', 'Please enter your password.', true);
+      return;
+    }
+
+    const endpoint = profileAuthMode === 'signup' ? '/api/profile/register' : '/api/profile/login';
+    const body = profileAuthMode === 'signup'
+      ? { email: email, password: password, confirm_password: confirmPassword }
+      : { email: email, password: password };
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        document.getElementById('auth-password-input').value = '';
+        const confEl = document.getElementById('auth-confirm-input');
+        if (confEl) confEl.value = '';
+        appState.profile = data.profile;
+        syncUiWithProfile(data.profile);
+        populateProfilePage();
+      } else {
+        showProfileFeedback('profile-auth-feedback', data.detail || 'Authentication failed.', true);
+      }
+    } catch (err) {
+      showProfileFeedback('profile-auth-feedback', 'Network error while signing in.', true);
+    }
+  }
+
+  function openGoogleLoginModal() {
+    const modal = document.getElementById('google-login-modal');
+    if (modal) modal.classList.remove('hidden');
+    const fb = document.getElementById('google-login-feedback');
+    if (fb) fb.classList.add('hidden');
+    const emailInput = document.getElementById('google-email-input');
+    const authEmail = (document.getElementById('auth-email-input')?.value || '').trim();
+    if (emailInput) {
+      if (authEmail && !emailInput.value) emailInput.value = authEmail;
+      setTimeout(() => emailInput.focus(), 50);
+    }
+  }
+
+  function closeGoogleLoginModal() {
+    const modal = document.getElementById('google-login-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  async function submitGoogleEmailLogin() {
+    const email = (document.getElementById('google-email-input')?.value || '').trim();
+    if (!email || !email.includes('@')) {
+      showProfileFeedback('google-login-feedback', 'Please enter a valid Google email address.', true);
+      return;
+    }
+    try {
+      const res = await fetch('/api/profile/google-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email: email })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        closeGoogleLoginModal();
+        appState.profile = data.profile;
+        syncUiWithProfile(data.profile);
+        populateProfilePage();
+      } else {
+        showProfileFeedback('google-login-feedback', data.detail || 'Google sign-in failed.', true);
+      }
+    } catch (err) {
+      showProfileFeedback('google-login-feedback', 'Network error during Google sign-in.', true);
+    }
+  }
+
+  async function logoutProfileAccount() {
+    try {
+      const res = await fetch('/api/profile/logout', {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        appState.profile = data.profile;
+        syncUiWithProfile(data.profile);
+        populateProfilePage();
+      }
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  }
+
+  function openChangePasswordModal() {
+    const modal = document.getElementById('change-password-modal');
+    if (modal) modal.classList.remove('hidden');
+    const fb = document.getElementById('modal-password-feedback');
+    if (fb) fb.classList.add('hidden');
+    const curEl = document.getElementById('profile-current-password');
+    const newEl = document.getElementById('profile-new-password');
+    const confEl = document.getElementById('profile-confirm-password');
+    if (curEl) curEl.value = '';
+    if (newEl) newEl.value = '';
+    if (confEl) confEl.value = '';
+    setTimeout(() => { if (curEl) curEl.focus(); }, 50);
+  }
+
+  function closeChangePasswordModal() {
+    const modal = document.getElementById('change-password-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
   function syncUiWithProfile(prof) {
     if (!prof) return;
     const dealerNameEl = document.getElementById('header-dealer-name');
@@ -2770,11 +3151,12 @@ tailwind.config = {
     const taglineEl = document.getElementById('header-dealer-tagline');
     if (taglineEl) taglineEl.textContent = prof.dealer_tagline || 'Plate Studio';
 
+    const displayUser = prof.is_logged_in ? (prof.email || prof.username || 'Account') : 'Sign In';
     const userLabelEl = document.getElementById('header-username-label');
-    if (userLabelEl) userLabelEl.textContent = prof.username || 'admin';
+    if (userLabelEl) userLabelEl.textContent = displayUser;
 
     const avatarEl = document.getElementById('header-user-avatar');
-    if (avatarEl) avatarEl.textContent = ((prof.username || 'A')[0] || 'A').toUpperCase();
+    if (avatarEl) avatarEl.textContent = ((displayUser || 'A')[0] || 'A').toUpperCase();
 
     const customBadge = document.getElementById('profile-logo-custom-badge');
     if (customBadge) customBadge.classList.toggle('hidden', !prof.has_custom_logo);
@@ -2788,6 +3170,35 @@ tailwind.config = {
 
   function populateProfilePage() {
     const prof = (appState && appState.profile) ? appState.profile : {};
+    const isLoggedIn = Boolean(prof.is_logged_in);
+
+    const authView = document.getElementById('profile-auth-view');
+    const dashView = document.getElementById('profile-dashboard-view');
+    if (authView && dashView) {
+      authView.classList.toggle('hidden', isLoggedIn);
+      dashView.classList.toggle('hidden', !isLoggedIn);
+    }
+
+    if (!isLoggedIn) {
+      setProfileAuthMode(prof.has_account ? 'signin' : 'signup');
+      return;
+    }
+
+    const activeEmail = prof.email || prof.username || 'user@forestwheel.com';
+    const signedInEmailEl = document.getElementById('profile-signed-in-email');
+    if (signedInEmailEl) signedInEmailEl.textContent = activeEmail;
+
+    const acctEmailEl = document.getElementById('profile-acct-email-display');
+    if (acctEmailEl) acctEmailEl.textContent = activeEmail;
+
+    const acctAvatarEl = document.getElementById('profile-acct-avatar');
+    if (acctAvatarEl) acctAvatarEl.textContent = ((activeEmail[0] || 'U')).toUpperCase();
+
+    const providerBadgeEl = document.getElementById('profile-acct-provider-badge');
+    if (providerBadgeEl) {
+      providerBadgeEl.textContent = prof.auth_provider === 'google' ? 'Google Connected' : 'Email Account';
+    }
+
     const nameInput = document.getElementById('profile-dealer-name');
     if (nameInput) nameInput.value = prof.dealer_name || 'Forest Wheel';
 
@@ -2802,9 +3213,6 @@ tailwind.config = {
 
     const wmToggle = document.getElementById('profile-watermark-toggle');
     if (wmToggle) wmToggle.checked = Boolean(prof.show_logo_watermark);
-
-    const userInput = document.getElementById('profile-username-input');
-    if (userInput) userInput.value = prof.username || 'admin';
 
     // Update Workspace Overview Stats
     const outCars = appState.cars_output || {};
@@ -2905,13 +3313,20 @@ tailwind.config = {
   }
 
   async function saveProfileCredentials() {
-    const newUsername = (document.getElementById('profile-username-input')?.value || '').trim();
     const currentPassword = document.getElementById('profile-current-password')?.value || '';
     const newPassword = document.getElementById('profile-new-password')?.value || '';
     const confirmPassword = document.getElementById('profile-confirm-password')?.value || '';
 
     if (!currentPassword) {
-      showProfileFeedback('profile-cred-feedback', 'Please enter your current password.', true);
+      showProfileFeedback('modal-password-feedback', 'Please enter your current password.', true);
+      return;
+    }
+    if (!newPassword || newPassword.length < 4) {
+      showProfileFeedback('modal-password-feedback', 'New password must be at least 4 characters.', true);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showProfileFeedback('modal-password-feedback', 'New password and confirmation do not match.', true);
       return;
     }
 
@@ -2922,7 +3337,6 @@ tailwind.config = {
         credentials: 'same-origin',
         body: JSON.stringify({
           current_password: currentPassword,
-          new_username: newUsername,
           new_password: newPassword,
           confirm_password: confirmPassword
         })
@@ -2932,13 +3346,14 @@ tailwind.config = {
         document.getElementById('profile-current-password').value = '';
         document.getElementById('profile-new-password').value = '';
         document.getElementById('profile-confirm-password').value = '';
-        showProfileFeedback('profile-cred-feedback', 'Credentials updated! Browser may prompt you to sign in with your new credentials.', false);
+        closeChangePasswordModal();
+        showProfileFeedback('profile-cred-feedback', 'Password updated successfully!', false);
         await fetchState();
       } else {
-        showProfileFeedback('profile-cred-feedback', data.detail || 'Failed to update credentials.', true);
+        showProfileFeedback('modal-password-feedback', data.detail || 'Failed to update password.', true);
       }
     } catch (err) {
-      showProfileFeedback('profile-cred-feedback', 'Error updating credentials.', true);
+      showProfileFeedback('modal-password-feedback', 'Error updating password.', true);
     }
   }
 
