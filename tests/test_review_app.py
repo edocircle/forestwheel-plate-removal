@@ -755,6 +755,118 @@ def test_profile_signup_signin_google_and_password_change_without_username(tmp_p
     assert "123456-test.apps.googleusercontent.com" in redir_resp.headers["location"]
 
 
+def test_session_binding_across_upload_gallery_frames_and_profile(tmp_path: Path) -> None:
+    """Verify Upload, Gallery, Frames, and Profile are isolated and bound to the signed-in account session."""
+    client, _, _, _ = _setup_review_fixture(tmp_path)
+
+    img = np.full((240, 360, 3), 180, dtype=np.uint8)
+    _, buf = cv2.imencode(".jpg", img)
+    jpg_bytes = buf.tobytes()
+
+    # 1. Register Account 1 (user1@dealer.com) and customize Upload, Gallery, Frames, and Profile
+    reg1 = client.post(
+        "/api/profile/register",
+        json={
+            "email": "user1@dealer.com",
+            "password": "user1-pass",
+            "confirm_password": "user1-pass",
+        },
+    )
+    assert reg1.status_code == 200
+
+    # Account 1 updates Profile & Frames config and uploads a car photo
+    client.put("/api/profile", json={"dealer_name": "Dealer One Showroom"})
+    client.post(
+        "/api/frame-config",
+        json={"ratio": "16:9", "fit_mode": "fill", "template_style": "soft_grey"},
+    )
+    up1 = client.post(
+        "/api/upload",
+        data={"car_id": "SLR 1111 A", "ratio": "16:9", "car_model": "Dealer 1 GT"},
+        files=[("files", ("car1.jpg", jpg_bytes, "image/jpeg"))],
+    )
+    assert up1.status_code == 200
+
+    state1 = client.get("/api/state").json()
+    assert state1["profile"]["email"] == "user1@dealer.com"
+    assert state1["profile"]["dealer_name"] == "Dealer One Showroom"
+    assert state1["frame_config"]["ratio"] == "16:9"
+    assert state1["frame_config"]["template_style"] == "soft_grey"
+    assert "SLR-1111-A" in state1["cars_review"]
+    assert state1["cars_meta"]["SLR-1111-A"]["car_model"] == "Dealer 1 GT"
+
+    # Approve car1.jpg in Frame Studio for Account 1 -> moves to Account 1's cars_output
+    save1 = client.post(
+        "/api/frame-save",
+        json={
+            "car_id": "SLR-1111-A",
+            "filename": "car1.jpg",
+            "ratio": "16:9",
+            "fit_mode": "fill",
+            "template_style": "soft_grey",
+            "in_place": True,
+        },
+    )
+    assert save1.status_code == 200
+    state1_after = client.get("/api/state").json()
+    assert "SLR-1111-A" in state1_after["cars_output"]
+
+    # 2. Register Account 2 (user2@motors.sg) -> automatically switches session cookie to Account 2
+    reg2 = client.post(
+        "/api/profile/register",
+        json={
+            "email": "user2@motors.sg",
+            "password": "user2-pass",
+            "confirm_password": "user2-pass",
+        },
+    )
+    assert reg2.status_code == 200
+
+    # Account 2 starts with a clean, isolated Gallery, default Frames config, and its own Profile
+    state2_initial = client.get("/api/state").json()
+    assert state2_initial["profile"]["email"] == "user2@motors.sg"
+    assert state2_initial["profile"]["dealer_name"] == "Forest Wheel"
+    assert state2_initial["frame_config"]["ratio"] == "1:1"
+    assert "SLR-1111-A" not in state2_initial["cars_output"]
+    assert "SLR-1111-A" not in state2_initial["cars_review"]
+
+    # Account 2 customizes its own Profile, Frames, and uploads its own car
+    client.put("/api/profile", json={"dealer_name": "Motors Two Hub"})
+    client.post(
+        "/api/frame-config",
+        json={"ratio": "9:16", "fit_mode": "fit", "template_style": "glass_overlay"},
+    )
+    up2 = client.post(
+        "/api/upload",
+        data={"car_id": "SKL 2222 B", "ratio": "9:16", "car_model": "Motors 2 Turbo"},
+        files=[("files", ("car2.jpg", jpg_bytes, "image/jpeg"))],
+    )
+    assert up2.status_code == 200
+
+    state2 = client.get("/api/state").json()
+    assert state2["profile"]["dealer_name"] == "Motors Two Hub"
+    assert state2["frame_config"]["ratio"] == "9:16"
+    assert "SKL-2222-B" in state2["cars_review"]
+    assert "SLR-1111-A" not in state2["cars_output"]
+    assert "SLR-1111-A" not in state2["cars_review"]
+
+    # 3. Log back into Account 1 -> restores Account 1's Upload/Gallery cars, Frames config, and Profile
+    login1 = client.post(
+        "/api/profile/login",
+        json={"email": "user1@dealer.com", "password": "user1-pass"},
+    )
+    assert login1.status_code == 200
+
+    state1_restored = client.get("/api/state").json()
+    assert state1_restored["profile"]["email"] == "user1@dealer.com"
+    assert state1_restored["profile"]["dealer_name"] == "Dealer One Showroom"
+    assert state1_restored["frame_config"]["ratio"] == "16:9"
+    assert "SLR-1111-A" in state1_restored["cars_output"]
+    assert "SKL-2222-B" not in state1_restored["cars_review"]
+    assert "SKL-2222-B" not in state1_restored["cars_output"]
+
+
+
 
 
 

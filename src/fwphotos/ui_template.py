@@ -148,16 +148,112 @@ tailwind.config = {
     </nav>
 
     <!-- Right Quick Actions -->
-    <div class="flex items-center gap-2.5">
+    <div class="flex items-center gap-2">
       <button type="button" onclick="switchTab('profile')" id="header-user-pill"
               class="px-3 py-1.5 rounded-full bg-white hover:bg-surface-container border border-outline-variant/30 text-xs font-semibold text-on-surface shadow-sm transition-all flex items-center gap-1.5"
               title="Dealership Profile &amp; Security Settings">
-        <span class="w-5 h-5 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-bold text-[11px]" id="header-user-avatar">A</span>
-        <span id="header-username-label" class="hidden sm:inline">admin</span>
+        <span class="w-5 h-5 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-bold text-[11px]" id="header-user-avatar">S</span>
+        <span id="header-username-label" class="hidden sm:inline">Sign In</span>
+      </button>
+      <button type="button" id="header-signout-btn" onclick="logoutProfileAccount()"
+              class="hidden px-3 py-1.5 rounded-full bg-surface-container hover:bg-error-container/60 text-on-surface-variant hover:text-error text-xs font-semibold transition-all items-center gap-1"
+              title="Sign out of current account session">
+        <span class="material-symbols-outlined text-[15px]">logout</span>
+        <span class="hidden sm:inline">Sign Out</span>
       </button>
     </div>
   </div>
 </header>
+
+<!-- ========================================================================= -->
+<!-- GLOBAL ACCOUNT SESSION GATE (BINDS UPLOAD, GALLERY, FRAMES & PROFILE)     -->
+<!-- ========================================================================= -->
+<div id="profile-auth-view" class="hidden max-w-md mx-auto px-4 py-8 sm:py-14">
+  <div class="apple-card-white rounded-[28px] p-7 sm:p-9 space-y-6 border border-outline-variant/30">
+    <!-- Top Icon & Title -->
+    <div class="text-center space-y-2">
+      <div class="w-14 h-14 rounded-2xl bg-primary-fixed text-primary mx-auto flex items-center justify-center shadow-sm">
+        <span class="material-symbols-outlined text-3xl">account_circle</span>
+      </div>
+      <span id="auth-target-tab-pill" class="inline-block px-3 py-0.5 rounded-full bg-primary-fixed/60 text-primary text-[11px] font-bold uppercase tracking-wider">
+        Account Session Required
+      </span>
+      <h1 id="auth-card-title" class="text-2xl font-bold tracking-tight text-on-surface">Sign in to Your Workspace</h1>
+      <p id="auth-card-subtitle" class="text-xs sm:text-sm text-on-surface-variant">
+        Sign in or create an account to access your bound <strong>Upload</strong>, <strong>Gallery</strong>, <strong>Frames</strong>, and <strong>Profile</strong> workspace.
+      </p>
+    </div>
+
+    <!-- Segmented Control: Sign In vs Create Account -->
+    <div class="grid grid-cols-2 bg-surface-container p-1 rounded-2xl">
+      <button type="button" id="auth-tab-signin" onclick="setProfileAuthMode('signin')"
+              class="py-2 rounded-xl text-xs font-bold bg-white text-on-surface shadow-sm transition-all">
+        Sign In
+      </button>
+      <button type="button" id="auth-tab-signup" onclick="setProfileAuthMode('signup')"
+              class="py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all">
+        Create Account
+      </button>
+    </div>
+
+    <!-- Continue with Google Email Logon Button -->
+    <button type="button" onclick="openGoogleLoginModal()"
+            class="w-full py-3 px-4 rounded-2xl bg-white hover:bg-surface border border-outline-variant/50 text-on-surface font-semibold text-xs sm:text-sm shadow-sm transition-all flex items-center justify-center gap-2.5">
+      <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.8-5.5 3.8-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 6.6 2.2 2.2 6.6 2.2 12S6.6 21.8 12 21.8c6.9 0 9.6-4.8 9.6-7.3 0-.5-.1-.9-.1-1.3H12z"/>
+        <path fill="#34A853" d="M3.3 7.3l3.2 2.4C7.4 7.5 9.5 5.9 12 5.9c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 8.2 2.2 4.9 4.3 3.3 7.3z"/>
+        <path fill="#FBBC05" d="M12 21.8c2.6 0 4.8-.9 6.4-2.4l-3-2.5c-.8.6-1.9 1-3.4 1-2.5 0-4.7-1.7-5.5-4.1l-3.2 2.5c1.6 3.2 4.9 5.5 8.7 5.5z"/>
+        <path fill="#4285F4" d="M21.6 14.5c.1-.5.2-1.1.2-1.8 0-.6-.1-1.2-.2-1.7H12v3.9h5.5c-.3 1.3-1.1 2.4-2.1 3.1l3 2.5c1.8-1.6 3.2-4 3.2-6z"/>
+      </svg>
+      <span>Continue with Google</span>
+    </button>
+
+    <!-- Divider -->
+    <div class="relative flex items-center justify-center">
+      <div class="border-t border-outline-variant/30 w-full"></div>
+      <span class="bg-white px-3 text-[11px] font-medium text-outline uppercase tracking-wider shrink-0">or with email</span>
+      <div class="border-t border-outline-variant/30 w-full"></div>
+    </div>
+
+    <!-- Email & Password Form -->
+    <div class="space-y-3.5">
+      <div>
+        <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Email Address</label>
+        <input id="auth-email-input" type="email" autocomplete="email" placeholder="you@company.com"
+               class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
+        <input id="auth-password-input" type="password" autocomplete="current-password" placeholder="Enter password"
+               onkeydown="if(event.key==='Enter') submitProfileAuth();"
+               class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+      </div>
+
+      <div id="auth-confirm-wrap" class="hidden">
+        <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Confirm Password</label>
+        <input id="auth-confirm-input" type="password" autocomplete="new-password" placeholder="Re-enter password"
+               onkeydown="if(event.key==='Enter') submitProfileAuth();"
+               class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
+      </div>
+    </div>
+
+    <p id="profile-auth-feedback" class="text-xs font-semibold text-center hidden"></p>
+
+    <button type="button" id="auth-submit-btn" onclick="submitProfileAuth()"
+            class="w-full py-3 rounded-2xl bg-gradient-to-b from-primary-container to-primary hover:opacity-95 text-white font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2">
+      <span class="material-symbols-outlined text-[18px]">login</span>
+      <span id="auth-submit-label">Sign In</span>
+    </button>
+
+    <p class="text-xs text-center text-on-surface-variant">
+      <span id="auth-switch-prompt">Don't have an account?</span>
+      <button type="button" id="auth-switch-link" onclick="toggleProfileAuthMode()" class="font-bold text-primary hover:underline ml-1">
+        Create account
+      </button>
+    </p>
+  </div>
+</div>
 
 <!-- ========================================================================= -->
 <!-- SCREEN 1: UPLOAD & PLATE DETECTION                                        -->
@@ -709,91 +805,8 @@ tailwind.config = {
 <!-- ========================================================================= -->
 <main id="screen-profile" class="hidden max-w-7xl mx-auto px-4 sm:px-8 pt-6 sm:pt-10">
 
-  <!-- 4A. SIGN IN / CREATE ACCOUNT GATE (Shown when not signed in) -->
-  <div id="profile-auth-view" class="max-w-md mx-auto py-6 sm:py-12">
-    <div class="apple-card-white rounded-[28px] p-7 sm:p-9 space-y-6 border border-outline-variant/30">
-      <!-- Top Icon & Title -->
-      <div class="text-center space-y-2">
-        <div class="w-14 h-14 rounded-2xl bg-primary-fixed text-primary mx-auto flex items-center justify-center shadow-sm">
-          <span class="material-symbols-outlined text-3xl">account_circle</span>
-        </div>
-        <h1 id="auth-card-title" class="text-2xl font-bold tracking-tight text-on-surface">Sign in to Profile</h1>
-        <p id="auth-card-subtitle" class="text-xs sm:text-sm text-on-surface-variant">Sign in or create an account to manage dealership branding and security settings.</p>
-      </div>
-
-      <!-- Segmented Control: Sign In vs Create Account -->
-      <div class="grid grid-cols-2 bg-surface-container p-1 rounded-2xl">
-        <button type="button" id="auth-tab-signin" onclick="setProfileAuthMode('signin')"
-                class="py-2 rounded-xl text-xs font-bold bg-white text-on-surface shadow-sm transition-all">
-          Sign In
-        </button>
-        <button type="button" id="auth-tab-signup" onclick="setProfileAuthMode('signup')"
-                class="py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:text-on-surface transition-all">
-          Create Account
-        </button>
-      </div>
-
-      <!-- Continue with Google Email Logon Button -->
-      <button type="button" onclick="openGoogleLoginModal()"
-              class="w-full py-3 px-4 rounded-2xl bg-white hover:bg-surface border border-outline-variant/50 text-on-surface font-semibold text-xs sm:text-sm shadow-sm transition-all flex items-center justify-center gap-2.5">
-        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-          <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.8-5.5 3.8-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 6.6 2.2 2.2 6.6 2.2 12S6.6 21.8 12 21.8c6.9 0 9.6-4.8 9.6-7.3 0-.5-.1-.9-.1-1.3H12z"/>
-          <path fill="#34A853" d="M3.3 7.3l3.2 2.4C7.4 7.5 9.5 5.9 12 5.9c1.9 0 3.2.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 8.2 2.2 4.9 4.3 3.3 7.3z"/>
-          <path fill="#FBBC05" d="M12 21.8c2.6 0 4.8-.9 6.4-2.4l-3-2.5c-.8.6-1.9 1-3.4 1-2.5 0-4.7-1.7-5.5-4.1l-3.2 2.5c1.6 3.2 4.9 5.5 8.7 5.5z"/>
-          <path fill="#4285F4" d="M21.6 14.5c.1-.5.2-1.1.2-1.8 0-.6-.1-1.2-.2-1.7H12v3.9h5.5c-.3 1.3-1.1 2.4-2.1 3.1l3 2.5c1.8-1.6 3.2-4 3.2-6z"/>
-        </svg>
-        <span>Continue with Google</span>
-      </button>
-
-      <!-- Divider -->
-      <div class="relative flex items-center justify-center">
-        <div class="border-t border-outline-variant/30 w-full"></div>
-        <span class="bg-white px-3 text-[11px] font-medium text-outline uppercase tracking-wider shrink-0">or with email</span>
-        <div class="border-t border-outline-variant/30 w-full"></div>
-      </div>
-
-      <!-- Email & Password Form -->
-      <div class="space-y-3.5">
-        <div>
-          <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Email Address</label>
-          <input id="auth-email-input" type="email" autocomplete="email" placeholder="you@company.com"
-                 class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Password</label>
-          <input id="auth-password-input" type="password" autocomplete="current-password" placeholder="Enter password"
-                 onkeydown="if(event.key==='Enter') submitProfileAuth();"
-                 class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
-        </div>
-
-        <div id="auth-confirm-wrap" class="hidden">
-          <label class="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">Confirm Password</label>
-          <input id="auth-confirm-input" type="password" autocomplete="new-password" placeholder="Re-enter password"
-                 onkeydown="if(event.key==='Enter') submitProfileAuth();"
-                 class="w-full px-3.5 py-2.5 rounded-xl bg-surface border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary"/>
-        </div>
-      </div>
-
-      <p id="profile-auth-feedback" class="text-xs font-semibold text-center hidden"></p>
-
-      <button type="button" id="auth-submit-btn" onclick="submitProfileAuth()"
-              class="w-full py-3 rounded-2xl bg-gradient-to-b from-primary-container to-primary hover:opacity-95 text-white font-semibold text-sm shadow-md transition-all flex items-center justify-center gap-2">
-        <span class="material-symbols-outlined text-[18px]">login</span>
-        <span id="auth-submit-label">Sign In</span>
-      </button>
-
-      <p class="text-xs text-center text-on-surface-variant">
-        <span id="auth-switch-prompt">Don't have an account?</span>
-        <button type="button" id="auth-switch-link" onclick="toggleProfileAuthMode()" class="font-bold text-primary hover:underline ml-1">
-          Create account
-        </button>
-      </p>
-    </div>
-  </div>
-
-  <!-- 4B. AUTHENTICATED PROFILE DASHBOARD (Shown once signed in) -->
-  <div id="profile-dashboard-view" class="hidden">
+  <!-- AUTHENTICATED PROFILE DASHBOARD (Shown once signed in) -->
+  <div id="profile-dashboard-view">
     <div class="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
       <div>
         <h1 class="text-2xl sm:text-4xl font-bold tracking-tight text-on-surface">Profile &amp; Dealership Settings</h1>
@@ -1495,12 +1508,29 @@ tailwind.config = {
 
   const SAMPLE_PLATES = ['SXX 1234 A', 'SBA 8888 X', 'SGP 9110 T', 'SLR 4580 M', 'SKL 2026 Z'];
 
-  // Switch between the 4 primary tabs: Upload, Gallery, Frames, Profile
+  const TAB_DISPLAY_NAMES = {
+    upload: 'Upload & Plate Removal',
+    gallery: 'Vehicle Gallery',
+    frames: 'Frame Template Editor',
+    profile: 'Profile & Dealership Settings'
+  };
+
+  // Switch between the 4 primary tabs: Upload, Gallery, Frames, Profile (All bound to account login)
   function switchTab(tab) {
     activeTab = tab;
+    const isLoggedIn = Boolean(appState && appState.profile && appState.profile.is_logged_in);
+
+    const authView = document.getElementById('profile-auth-view');
+    if (authView) authView.classList.toggle('hidden', isLoggedIn);
+
+    const tabPill = document.getElementById('auth-target-tab-pill');
+    if (tabPill) {
+      tabPill.textContent = `${TAB_DISPLAY_NAMES[tab] || 'Workspace'} • Account Session Required`;
+    }
+
     ['upload', 'gallery', 'frames', 'profile'].forEach(t => {
       const sec = document.getElementById('screen-' + t);
-      if (sec) sec.classList.toggle('hidden', t !== tab);
+      if (sec) sec.classList.toggle('hidden', !isLoggedIn || t !== tab);
 
       const deskBtn = document.getElementById('nav-desk-' + t);
       if (deskBtn) {
@@ -1519,6 +1549,13 @@ tailwind.config = {
       }
     });
 
+    if (!isLoggedIn) {
+      document.getElementById('selection-floating-bar')?.classList.add('hidden');
+      const hasAcct = Boolean(appState && appState.profile && appState.profile.has_account);
+      setProfileAuthMode(hasAcct ? 'signin' : 'signup');
+      return;
+    }
+
     if (tab !== 'gallery') {
       document.getElementById('selection-floating-bar').classList.add('hidden');
     } else {
@@ -1536,7 +1573,7 @@ tailwind.config = {
     }
   }
 
-  // Fetch backend state
+  // Fetch backend state for the currently authenticated account session
   async function fetchState() {
     try {
       const res = await fetch('/api/state', { credentials: 'same-origin' });
@@ -1551,9 +1588,8 @@ tailwind.config = {
       updateGalleryCountBadge();
       renderGallery();
       populateFrameStudioSelectors();
-      if (activeTab === 'profile') {
-        populateProfilePage();
-      }
+      populateProfilePage();
+      switchTab(activeTab);
     } catch (err) {
       console.error('Error loading state:', err);
     }
@@ -3198,9 +3234,11 @@ tailwind.config = {
         document.getElementById('auth-password-input').value = '';
         const confEl = document.getElementById('auth-confirm-input');
         if (confEl) confEl.value = '';
-        appState.profile = data.profile;
-        syncUiWithProfile(data.profile);
-        populateProfilePage();
+        studioCarId = null;
+        studioFilename = null;
+        await fetchState();
+        refreshBrandLogoImages();
+        switchTab(activeTab);
       } else {
         showProfileFeedback('profile-auth-feedback', data.detail || 'Authentication failed.', true);
       }
@@ -3281,9 +3319,11 @@ tailwind.config = {
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         closeGoogleLoginModal();
-        appState.profile = data.profile;
-        syncUiWithProfile(data.profile);
-        populateProfilePage();
+        studioCarId = null;
+        studioFilename = null;
+        await fetchState();
+        refreshBrandLogoImages();
+        switchTab(activeTab);
         showProfileFeedback('profile-cred-feedback', 'Verified & connected with Google OAuth!', false);
       } else {
         showProfileFeedback('google-login-feedback', data.detail || 'Google token verification failed.', true);
@@ -3370,9 +3410,11 @@ tailwind.config = {
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         closeGoogleLoginModal();
-        appState.profile = data.profile;
-        syncUiWithProfile(data.profile);
-        populateProfilePage();
+        studioCarId = null;
+        studioFilename = null;
+        await fetchState();
+        refreshBrandLogoImages();
+        switchTab(activeTab);
         if (googleModalLinkMode) {
           showProfileFeedback('profile-cred-feedback', `Linked Google account (${email})!`, false);
         }
@@ -3486,9 +3528,21 @@ tailwind.config = {
       });
       if (res.ok) {
         const data = await res.json();
+        uploadFilesQueue = [];
+        studioCarId = null;
+        studioFilename = null;
+        selectedPhotoKeys.clear();
+        selectedCarIds.clear();
+        appState.cars_output = {};
+        appState.cars_review = {};
+        appState.cars_meta = {};
         appState.profile = data.profile;
+        renderUploadQueue();
+        updateGalleryCountBadge();
         syncUiWithProfile(data.profile);
         populateProfilePage();
+        refreshBrandLogoImages();
+        switchTab(activeTab);
       }
     } catch (err) {
       console.error('Logout error:', err);
@@ -3516,25 +3570,32 @@ tailwind.config = {
 
   function syncUiWithProfile(prof) {
     if (!prof) return;
+    const isLoggedIn = Boolean(prof.is_logged_in);
     const dealerNameEl = document.getElementById('header-dealer-name');
     if (dealerNameEl) dealerNameEl.textContent = prof.dealer_name || 'Forest Wheel';
 
     const taglineEl = document.getElementById('header-dealer-tagline');
     if (taglineEl) taglineEl.textContent = prof.dealer_tagline || 'Plate Studio';
 
-    const displayUser = prof.is_logged_in ? (prof.email || prof.username || 'Account') : 'Sign In';
+    const displayUser = isLoggedIn ? (prof.email || prof.username || 'Account') : 'Sign In';
     const userLabelEl = document.getElementById('header-username-label');
     if (userLabelEl) userLabelEl.textContent = displayUser;
 
     const avatarEl = document.getElementById('header-user-avatar');
-    if (avatarEl) avatarEl.textContent = ((displayUser || 'A')[0] || 'A').toUpperCase();
+    if (avatarEl) avatarEl.textContent = ((displayUser || 'S')[0] || 'S').toUpperCase();
+
+    const headerSignoutBtn = document.getElementById('header-signout-btn');
+    if (headerSignoutBtn) {
+      headerSignoutBtn.classList.toggle('hidden', !isLoggedIn);
+      headerSignoutBtn.classList.toggle('flex', isLoggedIn);
+    }
 
     const customBadge = document.getElementById('profile-logo-custom-badge');
     if (customBadge) customBadge.classList.toggle('hidden', !prof.has_custom_logo);
 
     // Pre-fill default specs in Upload page if empty
-    const uploadSpecsInput = document.getElementById('batch-specs-input');
-    if (uploadSpecsInput && !uploadSpecsInput.value && prof.default_specs) {
+    const uploadSpecsInput = document.getElementById('input-car-specs');
+    if (uploadSpecsInput && prof.default_specs) {
       uploadSpecsInput.value = prof.default_specs;
     }
   }
@@ -3542,13 +3603,6 @@ tailwind.config = {
   function populateProfilePage() {
     const prof = (appState && appState.profile) ? appState.profile : {};
     const isLoggedIn = Boolean(prof.is_logged_in);
-
-    const authView = document.getElementById('profile-auth-view');
-    const dashView = document.getElementById('profile-dashboard-view');
-    if (authView && dashView) {
-      authView.classList.toggle('hidden', isLoggedIn);
-      dashView.classList.toggle('hidden', !isLoggedIn);
-    }
 
     if (!isLoggedIn) {
       setProfileAuthMode(prof.has_account ? 'signin' : 'signup');
@@ -3640,6 +3694,11 @@ tailwind.config = {
     if (headerImg) headerImg.src = bust;
     const prevImg = document.getElementById('profile-logo-preview-img');
     if (prevImg) prevImg.src = bust;
+    const ovBust = '/media/plate-overlay?t=' + Date.now();
+    const ovImg = document.getElementById('plate-overlay-preview-img');
+    if (ovImg) ovImg.src = ovBust;
+    const calibOv = document.getElementById('plate-calib-cover-img');
+    if (calibOv) calibOv.setAttribute('href', ovBust);
   }
 
   async function uploadBrandLogo(files) {

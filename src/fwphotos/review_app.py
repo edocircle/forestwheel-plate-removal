@@ -21,9 +21,10 @@ import re
 import secrets
 import shutil
 import zipfile
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -214,6 +215,36 @@ def _pil_to_jpeg_bytes(pil_img: Image.Image, max_width: int = 0, quality: int = 
     return buf.getvalue()
 
 
+class _ScopedPath(os.PathLike[str]):
+    """Path-like proxy that dynamically resolves to the active signed-in account's workspace directory."""
+
+    def __init__(self, resolver: Callable[[], Path]) -> None:
+        self._resolver = resolver
+
+    def _target(self) -> Path:
+        return self._resolver()
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._target())
+
+    def __str__(self) -> str:
+        return str(self._target())
+
+    def __repr__(self) -> str:
+        return f"_ScopedPath({self._target()!r})"
+
+    def __truediv__(self, key: str | os.PathLike[str]) -> Path:
+        return self._target() / key
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (Path, _ScopedPath)):
+            return Path(self) == Path(other)
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._target(), name)
+
+
 def create_review_app(
     config_path: Path = Path("config/settings.yaml"),
     review_dir_override: Path | None = None,
@@ -231,30 +262,68 @@ def create_review_app(
     sync_cfg = settings.get("sync", {})
     app_cfg = settings.get("review_app", {})
 
-    review_dir = Path(
+    base_review_dir = Path(
         review_dir_override or paths_cfg.get("review_dir", "data/review")
     )
-    output_dir = Path(
+    base_output_dir = Path(
         output_dir_override or paths_cfg.get("output_dir", "data/output")
     )
-    inbox_dir = Path(inbox_dir_override or Path("data/inbox"))
-    decisions_file = Path(
+    base_inbox_dir = Path(inbox_dir_override or Path("data/inbox"))
+    base_decisions_file = Path(
         decisions_file_override
         or app_cfg.get("decisions_file", "data/review_decisions.json")
     )
-    state_file = Path(
+    base_state_file = Path(
         state_file_override or paths_cfg.get("state_file", "data/processed_state.json")
     )
-    cars_meta_file = state_file.parent / "cars_metadata.json"
-    frame_config_file = state_file.parent / "frame_config.json"
-    custom_overlay_file = state_file.parent / "custom_plate_overlay.png"
-    user_profile_file = state_file.parent / "user_profile.json"
-    custom_logo_file = state_file.parent / "custom_brand_logo.png"
-    accounts_db_file = state_file.parent / "accounts.db"
+    base_data_root = base_state_file.parent
+    accounts_db_file = base_data_root / "accounts.db"
     auth_db = AccountDatabase(accounts_db_file)
     default_logo_path = Path("assets/logo.png")
+
+    active_user_id_ctx: ContextVar[int | None] = ContextVar("active_user_id_ctx", default=None)
+
+    def _user_data_root() -> Path:
+        uid = active_user_id_ctx.get()
+        if uid is not None and uid >= 2:
+            d = base_data_root / "accounts_data" / f"user_{uid}"
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+        return base_data_root
+
+    review_dir = _ScopedPath(
+        lambda: (_user_data_root() / "review")
+        if (active_user_id_ctx.get() or 0) >= 2
+        else base_review_dir
+    )
+    output_dir = _ScopedPath(
+        lambda: (_user_data_root() / "output")
+        if (active_user_id_ctx.get() or 0) >= 2
+        else base_output_dir
+    )
+    inbox_dir = _ScopedPath(
+        lambda: (_user_data_root() / "inbox")
+        if (active_user_id_ctx.get() or 0) >= 2
+        else base_inbox_dir
+    )
+    decisions_file = _ScopedPath(
+        lambda: (_user_data_root() / "review_decisions.json")
+        if (active_user_id_ctx.get() or 0) >= 2
+        else base_decisions_file
+    )
+    state_file = _ScopedPath(
+        lambda: (_user_data_root() / "processed_state.json")
+        if (active_user_id_ctx.get() or 0) >= 2
+        else base_state_file
+    )
+    cars_meta_file = _ScopedPath(lambda: _user_data_root() / "cars_metadata.json")
+    frame_config_file = _ScopedPath(lambda: _user_data_root() / "frame_config.json")
+    custom_overlay_file = _ScopedPath(lambda: _user_data_root() / "custom_plate_overlay.png")
+    user_profile_file = _ScopedPath(lambda: _user_data_root() / "user_profile.json")
+    custom_logo_file = _ScopedPath(lambda: _user_data_root() / "custom_brand_logo.png")
+
     car_state_file_cfg = sync_cfg.get("car_state_file")
-    car_state_dir = Path(car_state_file_cfg).parent if car_state_file_cfg else state_file.parent
+    car_state_dir = Path(car_state_file_cfg).parent if car_state_file_cfg else base_data_root
 
     template_path = Path(paths_cfg.get("template_config", "config/template.yaml"))
     template_cfg = load_template_config(template_path)
@@ -262,10 +331,11 @@ def create_review_app(
     overlay_path = Path(
         paths_cfg.get("plate_overlay_asset", "assets/plate_overlay.png")
     )
+    default_overlay_bgra = load_overlay_rgba(overlay_path) if overlay_path.exists() else None
     overlay_bgra = (
-        load_overlay_rgba(custom_overlay_file)
+        load_overlay_rgba(Path(custom_overlay_file))
         if custom_overlay_file.exists()
-        else (load_overlay_rgba(overlay_path) if overlay_path.exists() else None)
+        else default_overlay_bgra
     )
 
     user_env_key = str(app_cfg.get("auth_user_env", "FW_REVIEW_USER"))
@@ -281,9 +351,9 @@ def create_review_app(
         ).hex()
 
     def _get_active_logo_path() -> Path | None:
-        """Return custom uploaded brand logo path, falling back to default assets/logo.png."""
+        """Return custom uploaded brand logo path for active account, falling back to default assets/logo.png."""
         if custom_logo_file.exists():
-            return custom_logo_file
+            return Path(custom_logo_file)
         if default_logo_path.exists():
             return default_logo_path
         return None
@@ -303,8 +373,10 @@ def create_review_app(
         oauth_cfg = _get_oauth_cfg()
 
         db_user = auth_db.get_user_by_session_token(session_token) if session_token else None
-        if db_user is None and raw.get("is_logged_in") and raw.get("logged_in_email"):
-            db_user = auth_db.get_user_by_email(str(raw.get("logged_in_email")))
+        if db_user is None and session_token is None:
+            ctx_uid = active_user_id_ctx.get()
+            if ctx_uid is not None:
+                db_user = auth_db.get_user_by_id(ctx_uid)
 
         total_db_users = auth_db.count_users()
         has_legacy_pw = bool(raw.get("password_hash") and raw.get("password_salt"))
@@ -514,6 +586,24 @@ def create_review_app(
         redoc_url=None,
         openapi_url=None,
     )
+
+    @app.middleware("http")
+    async def bind_account_session_middleware(request: Request, call_next: Any) -> Response:
+        """Bind every incoming HTTP request across Upload, Gallery, Frames, and Profile to the active account session."""
+        nonlocal overlay_bgra
+        raw_tok = request.cookies.get("fw_session")
+        db_user = auth_db.get_user_by_session_token(raw_tok) if raw_tok else None
+        uid = int(db_user["id"]) if db_user else None
+        ctx_token = active_user_id_ctx.set(uid)
+        try:
+            overlay_bgra = (
+                load_overlay_rgba(Path(custom_overlay_file))
+                if custom_overlay_file.exists()
+                else default_overlay_bgra
+            )
+            return await call_next(request)
+        finally:
+            active_user_id_ctx.reset(ctx_token)
 
     def _discover_folder_tree(base_folder: Path, is_review: bool = False) -> dict[str, list[dict[str, Any]]]:
         """Group images inside base_folder by car_id (or '_root' for flat files)."""
@@ -826,6 +916,7 @@ def create_review_app(
             ip_address=_client_ip(request),
             user_agent=request.headers.get("user-agent", ""),
         )
+        active_user_id_ctx.set(int(user["id"]))
         raw = _load_json_dict(user_profile_file)
         raw["email"] = user["email"]
         raw["username"] = user["email"]
@@ -873,6 +964,7 @@ def create_review_app(
             ip_address=_client_ip(request),
             user_agent=request.headers.get("user-agent", ""),
         )
+        active_user_id_ctx.set(int(user["id"]))
         raw = _load_json_dict(user_profile_file)
         raw["email"] = user["email"]
         raw["username"] = user["email"]
@@ -949,6 +1041,7 @@ def create_review_app(
             ip_address=_client_ip(request),
             user_agent=request.headers.get("user-agent", ""),
         )
+        active_user_id_ctx.set(int(user["id"]))
         raw = _load_json_dict(user_profile_file)
         raw["email"] = user["email"]
         raw["username"] = user["email"]
@@ -1063,6 +1156,7 @@ def create_review_app(
             ip_address=_client_ip(request),
             user_agent=request.headers.get("user-agent", ""),
         )
+        active_user_id_ctx.set(int(user["id"]))
         raw = _load_json_dict(user_profile_file)
         raw["email"] = user["email"]
         raw["username"] = user["email"]
@@ -1174,6 +1268,7 @@ def create_review_app(
         raw["logged_in_email"] = ""
         raw["updated_at"] = datetime.now(timezone.utc).isoformat()
         _save_json_dict(user_profile_file, raw)
+        active_user_id_ctx.set(None)
         resp = JSONResponse(content={"ok": True, "profile": _get_user_profile(None)})
         resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
         return resp
