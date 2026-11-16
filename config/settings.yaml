@@ -73,5 +73,14 @@ review_app:
   thumbnail_width: 1080
   low_conf_preview_floor: 0.40
 
+storage:
+  backend: "local" # Set FW_STORAGE_BACKEND=s3 on Hetzner VPS for Object Storage
+  endpoint_url: "https://fsn1.your-objectstorage.com"
+  region: "fsn1"
+  bucket: "forestwheel-photos-prod"
+  access_key_env: "FW_S3_ACCESS_KEY"
+  secret_key_env: "FW_S3_SECRET_KEY"
+  local_cache_max_mb: 500
+
 
 

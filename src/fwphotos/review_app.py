@@ -56,6 +56,7 @@ from fwphotos.overlay import (
     warp_and_composite_single,
 )
 from fwphotos.pipeline import run_pipeline
+from fwphotos.storage import PhotoStorage, build_photo_storage, scope_prefix
 from fwphotos.ui_template import STITCH_UI_HTML
 
 logger = logging.getLogger(__name__)
@@ -254,6 +255,7 @@ def create_review_app(
     state_file_override: Path | None = None,
     detector: PlateDetector | None = None,
     env: dict[str, str] | None = None,
+    storage_override: PhotoStorage | None = None,
 ) -> FastAPI:
     """Create and configure the Stitch-aligned FastAPI application."""
     settings = load_settings(config_path)
@@ -279,6 +281,9 @@ def create_review_app(
     base_data_root = base_state_file.parent
     accounts_db_file = base_data_root / "accounts.db"
     auth_db = AccountDatabase(accounts_db_file)
+    photo_storage: PhotoStorage = storage_override or build_photo_storage(
+        settings, base_data_root, env=env
+    )
     default_logo_path = Path("assets/logo.png")
 
     active_user_id_ctx: ContextVar[int | None] = ContextVar("active_user_id_ctx", default=None)
@@ -288,6 +293,47 @@ def create_review_app(
         if uid is not None:
             return False
         return review_dir_override is None or auth_db.count_users() > 0
+
+    def _active_scope() -> str:
+        return scope_prefix(active_user_id_ctx.get(), is_guest_trial=_is_guest_trial())
+
+    def _s3_key(*parts: str) -> str:
+        cleaned = [str(p).strip("/").replace("\\", "/") for p in parts if str(p).strip("/")]
+        return "/".join([_active_scope(), *cleaned])
+
+    def _decode_bytes_bgr(raw_bytes: bytes) -> np.ndarray | None:
+        arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+        bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if bgr is not None:
+            return bgr
+        try:
+            with Image.open(io.BytesIO(raw_bytes)) as pil_img:
+                rgb = np.array(pil_img.convert("RGB"))
+                return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _guess_content_type(filename: str) -> str:
+        ext = Path(filename).suffix.lower()
+        if ext == ".png":
+            return "image/png"
+        if ext == ".webp":
+            return "image/webp"
+        return "image/jpeg"
+
+    def _sync_local_dir_to_s3(local_dir: Path, s3_folder: str, remove_local: bool = True) -> None:
+        if not photo_storage.is_s3 or not local_dir.exists():
+            return
+        for f in local_dir.rglob("*"):
+            if f.is_file():
+                rel = f.relative_to(local_dir).as_posix()
+                photo_storage.write_bytes(
+                    _s3_key(s3_folder, rel),
+                    f.read_bytes(),
+                    content_type=_guess_content_type(f.name),
+                )
+        if remove_local:
+            shutil.rmtree(local_dir, ignore_errors=True)
 
     def _use_scoped_dirs() -> bool:
         uid = active_user_id_ctx.get()
@@ -366,10 +412,31 @@ def create_review_app(
             100_000,
         ).hex()
 
+    def _has_custom_logo() -> bool:
+        if custom_logo_file.exists():
+            return True
+        if photo_storage.is_s3:
+            return photo_storage.exists(_s3_key("assets", "custom_brand_logo.png"))
+        return False
+
+    def _has_custom_overlay() -> bool:
+        if custom_overlay_file.exists():
+            return True
+        if photo_storage.is_s3:
+            return photo_storage.exists(_s3_key("assets", "custom_plate_overlay.png"))
+        return False
+
     def _get_active_logo_path() -> Path | None:
         """Return custom uploaded brand logo path for active account, falling back to default assets/logo.png."""
         if custom_logo_file.exists():
             return Path(custom_logo_file)
+        if photo_storage.is_s3:
+            raw_logo = photo_storage.read_bytes(_s3_key("assets", "custom_brand_logo.png"))
+            if raw_logo:
+                tmp_logo = Path(custom_logo_file)
+                tmp_logo.parent.mkdir(parents=True, exist_ok=True)
+                tmp_logo.write_bytes(raw_logo)
+                return tmp_logo
         if default_logo_path.exists():
             return default_logo_path
         return None
@@ -423,7 +490,7 @@ def create_review_app(
                 "default_specs": str(raw.get("default_specs", "Verified Pre-Owned • Singapore")),
                 "currency_prefix": str(raw.get("currency_prefix", "S$")),
                 "show_logo_watermark": bool(raw.get("show_logo_watermark", False)),
-                "has_custom_logo": custom_logo_file.exists(),
+                "has_custom_logo": _has_custom_logo(),
                 "has_custom_credentials": has_pw or has_legacy_pw,
                 "last_login_at": str(db_user.get("last_login_at") or ""),
                 "updated_at": str(raw.get("updated_at") or db_user.get("updated_at") or ""),
@@ -450,7 +517,7 @@ def create_review_app(
             "default_specs": str(raw.get("default_specs", "Verified Pre-Owned • Singapore")),
             "currency_prefix": str(raw.get("currency_prefix", "S$")),
             "show_logo_watermark": bool(raw.get("show_logo_watermark", False)),
-            "has_custom_logo": custom_logo_file.exists(),
+            "has_custom_logo": _has_custom_logo(),
             "has_custom_credentials": has_legacy_pw,
             "last_login_at": "",
             "updated_at": str(raw.get("updated_at", "")),
@@ -470,7 +537,7 @@ def create_review_app(
             "car_model": str(cfg.get("car_model", f"{prof['dealer_name']} Showroom")),
             "car_price": str(cfg.get("car_price", "")),
             "car_specs": str(cfg.get("car_specs", prof["default_specs"])),
-            "has_custom_overlay": custom_overlay_file.exists(),
+            "has_custom_overlay": _has_custom_overlay(),
         }
 
     def _render_with_active_frame_config(
@@ -611,7 +678,12 @@ def create_review_app(
         sample_fname = "01_front_sedan.jpg"
         out_img = output_dir / sample_cid / sample_fname
         inbox_img = inbox_dir / sample_cid / sample_fname
-        if out_img.exists() and inbox_img.exists():
+        if photo_storage.is_s3:
+            if photo_storage.exists(_s3_key("output", sample_cid, sample_fname)) and photo_storage.exists(
+                _s3_key("inbox", sample_cid, sample_fname)
+            ):
+                return
+        elif out_img.exists() and inbox_img.exists():
             return
 
         src_sample = Path(paths_cfg.get("input_dir", "data/test_photos")) / sample_fname
@@ -677,6 +749,18 @@ def create_review_app(
             out_img, format="JPEG", quality=jpeg_quality, subsampling=0
         )
 
+        if photo_storage.is_s3:
+            photo_storage.write_bytes(_s3_key("inbox", sample_cid, sample_fname), inbox_img.read_bytes(), "image/jpeg")
+            photo_storage.write_bytes(
+                _s3_key("output", "_covered_cache", sample_cid, sample_fname),
+                cache_file.read_bytes(),
+                "image/jpeg",
+            )
+            photo_storage.write_bytes(_s3_key("output", sample_cid, sample_fname), out_img.read_bytes(), "image/jpeg")
+            inbox_img.unlink(missing_ok=True)
+            cache_file.unlink(missing_ok=True)
+            out_img.unlink(missing_ok=True)
+
     @app.middleware("http")
     async def bind_account_session_middleware(request: Request, call_next: Any) -> Response:
         """Bind every incoming HTTP request across Upload, Gallery, Frames, and Profile to the active account session."""
@@ -686,21 +770,116 @@ def create_review_app(
         uid = int(db_user["id"]) if db_user else None
         ctx_token = active_user_id_ctx.set(uid)
         try:
-            overlay_bgra = (
-                load_overlay_rgba(Path(custom_overlay_file))
-                if custom_overlay_file.exists()
-                else default_overlay_bgra
-            )
+            if custom_overlay_file.exists():
+                overlay_bgra = load_overlay_rgba(Path(custom_overlay_file))
+            elif photo_storage.is_s3:
+                ov_bytes = photo_storage.read_bytes(_s3_key("assets", "custom_plate_overlay.png"))
+                if ov_bytes:
+                    Path(custom_overlay_file).parent.mkdir(parents=True, exist_ok=True)
+                    Path(custom_overlay_file).write_bytes(ov_bytes)
+                    overlay_bgra = load_overlay_rgba(Path(custom_overlay_file))
+                else:
+                    overlay_bgra = default_overlay_bgra
+            else:
+                overlay_bgra = default_overlay_bgra
             if _is_guest_trial():
                 _ensure_guest_sample_seeded()
             return await call_next(request)
         finally:
             active_user_id_ctx.reset(ctx_token)
 
+    def _save_covered_cache_bgr(car_id: str, stem: str, bgr: np.ndarray) -> None:
+        if photo_storage.is_s3:
+            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+            if ok:
+                photo_storage.write_bytes(
+                    _s3_key("output", "_covered_cache", car_id, f"{stem}.jpg"),
+                    buf.tobytes(),
+                    content_type="image/jpeg",
+                )
+            return
+        cache_file = output_dir / "_covered_cache" / car_id / f"{stem}.jpg"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(cache_file), bgr)
+
+    def _save_output_pil(car_id: str, filename: str, framed_pil: Image.Image) -> Path:
+        out_p = (output_dir if car_id == "_root" else (output_dir / car_id)) / filename
+        if photo_storage.is_s3:
+            buf = io.BytesIO()
+            framed_pil.convert("RGB").save(
+                buf, format="JPEG", quality=jpeg_quality, subsampling=0
+            )
+            key = (
+                _s3_key("output", filename)
+                if car_id == "_root"
+                else _s3_key("output", car_id, filename)
+            )
+            photo_storage.write_bytes(key, buf.getvalue(), content_type="image/jpeg")
+            return out_p
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        framed_pil.convert("RGB").save(
+            out_p, format="JPEG", quality=jpeg_quality, subsampling=0
+        )
+        return out_p
+
+    def _read_folder_bgr(folder_name: str, car_id: str, filename: str) -> np.ndarray | None:
+        base_map = {"output": output_dir, "review": review_dir, "inbox": inbox_dir}
+        base_d = base_map[folder_name]
+        local_p = (base_d if car_id == "_root" else (base_d / car_id)) / filename
+        if local_p.is_file():
+            return load_image_bgr(local_p)
+        if photo_storage.is_s3:
+            key = (
+                _s3_key(folder_name, filename)
+                if car_id == "_root"
+                else _s3_key(folder_name, car_id, filename)
+            )
+            raw_b = photo_storage.read_bytes(key)
+            if raw_b:
+                return _decode_bytes_bgr(raw_b)
+        return None
+
     def _discover_folder_tree(base_folder: Path, is_review: bool = False) -> dict[str, list[dict[str, Any]]]:
-        """Group images inside base_folder by car_id (or '_root' for flat files)."""
+        """Group images inside base_folder (or S3 prefix) by car_id (or '_root' for flat files)."""
         decisions = _load_json_dict(decisions_file) if is_review else {}
         grouped: dict[str, list[dict[str, Any]]] = {}
+
+        if photo_storage.is_s3:
+            folder_name = "review" if is_review else "output"
+            prefix = _s3_key(folder_name)
+            ext_set = {e.lower() for e in supported_exts}
+            keys = photo_storage.list_keys(prefix)
+            prefix_slash = prefix.rstrip("/") + "/"
+            for k in keys:
+                if not k.startswith(prefix_slash):
+                    continue
+                rel = k[len(prefix_slash) :]
+                parts = rel.split("/")
+                if len(parts) == 1:
+                    cid, fname = "_root", parts[0]
+                elif len(parts) == 2:
+                    cid, fname = parts[0], parts[1]
+                    if cid.startswith("_"):
+                        continue
+                else:
+                    continue
+                if Path(fname).suffix.lower() not in ext_set:
+                    continue
+                grouped.setdefault(cid, []).append(
+                    {
+                        "car_id": cid,
+                        "filename": fname,
+                        "reason": _lookup_logged_reason(cid, fname, state_file, car_state_dir)
+                        if is_review
+                        else "ok",
+                        "status": decisions.get(f"{cid}/{fname}", {}).get("status", "pending")
+                        if is_review
+                        else "ready",
+                        "updated_at": decisions.get(f"{cid}/{fname}", {}).get("updated_at", ""),
+                    }
+                )
+            return grouped
+
         if not base_folder.exists():
             return grouped
 
@@ -753,8 +932,34 @@ def create_review_app(
         cache_file = output_dir / "_covered_cache" / car_id / f"{stem}.jpg"
         if cache_file.exists():
             return load_image_bgr(cache_file)
+        if photo_storage.is_s3:
+            cached_bytes = photo_storage.read_bytes(
+                _s3_key("output", "_covered_cache", car_id, f"{stem}.jpg")
+            )
+            if cached_bytes:
+                bgr = _decode_bytes_bgr(cached_bytes)
+                if bgr is not None:
+                    return bgr
 
         decisions = _load_json_dict(decisions_file)
+
+        if photo_storage.is_s3:
+            for ext in supported_exts:
+                inbox_key = _s3_key("inbox", car_id, f"{stem}{ext}")
+                raw_b = photo_storage.read_bytes(inbox_key)
+                if raw_b:
+                    bgr = _decode_bytes_bgr(raw_b)
+                    if bgr is not None:
+                        dec_entry = decisions.get(f"{car_id}/{stem}{ext}", {})
+                        if dec_entry.get("plate_cover_removed"):
+                            _save_covered_cache_bgr(car_id, stem, bgr)
+                            return bgr
+                        dets = _get_detector().detect_array(bgr)
+                        if dets:
+                            ov = apply_plate_overlays(bgr, dets, settings, overlay_bgra)
+                            _save_covered_cache_bgr(car_id, stem, ov.image_bgr)
+                            return ov.image_bgr
+                        return bgr
 
         # Otherwise check if raw photo exists in inbox_dir/<car_id> or data/test_photos
         search_dirs = [
@@ -770,15 +975,13 @@ def create_review_app(
                     bgr = load_image_bgr(cand)
                     dec_entry = decisions.get(f"{car_id}/{cand.name}", {})
                     if dec_entry.get("plate_cover_removed"):
-                        cache_file.parent.mkdir(parents=True, exist_ok=True)
-                        cv2.imwrite(str(cache_file), bgr)
+                        _save_covered_cache_bgr(car_id, stem, bgr)
                         return bgr
 
                     dets = _get_detector().detect_array(bgr)
                     if dets:
                         ov = apply_plate_overlays(bgr, dets, settings, overlay_bgra)
-                        cache_file.parent.mkdir(parents=True, exist_ok=True)
-                        cv2.imwrite(str(cache_file), ov.image_bgr)
+                        _save_covered_cache_bgr(car_id, stem, ov.image_bgr)
                         return ov.image_bgr
                     return bgr
         return None
@@ -788,7 +991,6 @@ def create_review_app(
         out_tree = _discover_folder_tree(output_dir, is_review=False)
         updated_files = 0
         for cid, items in out_tree.items():
-            target_d = output_dir if cid == "_root" else (output_dir / cid)
             for item in items:
                 fname = item["filename"]
                 stem = Path(fname).stem
@@ -797,10 +999,7 @@ def create_review_app(
                     framed_pil = _render_with_active_frame_config(
                         covered_bgr, car_id=cid, ratio_override=ratio_override
                     )
-                    out_p = target_d / fname
-                    framed_pil.convert("RGB").save(
-                        out_p, format="JPEG", quality=jpeg_quality, subsampling=0
-                    )
+                    _save_output_pil(cid, fname, framed_pil)
                     updated_files += 1
         return updated_files
 
@@ -904,6 +1103,12 @@ def create_review_app(
                 rgba = pil_logo.convert("RGBA")
                 custom_logo_file.parent.mkdir(parents=True, exist_ok=True)
                 rgba.save(custom_logo_file, format="PNG")
+                if photo_storage.is_s3:
+                    photo_storage.write_bytes(
+                        _s3_key("assets", "custom_brand_logo.png"),
+                        Path(custom_logo_file).read_bytes(),
+                        content_type="image/png",
+                    )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=400, detail=f"Invalid image file for brand logo: {exc}"
@@ -927,6 +1132,8 @@ def create_review_app(
         tok = _get_session_token(request)
         if custom_logo_file.exists():
             custom_logo_file.unlink(missing_ok=True)
+        if photo_storage.is_s3:
+            photo_storage.delete_key(_s3_key("assets", "custom_brand_logo.png"))
         if _get_user_profile(tok).get("show_logo_watermark"):
             _re_render_all_output_photos()
         return JSONResponse(
@@ -1473,21 +1680,7 @@ def create_review_app(
         _save_json_dict(frame_config_file, new_cfg)
 
         # Re-render all existing output photos with the newly saved Frame configuration
-        out_tree = _discover_folder_tree(output_dir, is_review=False)
-        updated_files = 0
-        for cid, items in out_tree.items():
-            target_d = output_dir if cid == "_root" else (output_dir / cid)
-            for item in items:
-                fname = item["filename"]
-                stem = Path(fname).stem
-                covered_bgr = _find_plate_covered_base(cid, stem)
-                if covered_bgr is not None:
-                    framed_pil = _render_with_active_frame_config(
-                        covered_bgr, car_id=cid, ratio_override=new_cfg["ratio"]
-                    )
-                    out_p = target_d / fname
-                    framed_pil.convert("RGB").save(out_p, format="JPEG", quality=jpeg_quality)
-                    updated_files += 1
+        updated_files = _re_render_all_output_photos(ratio_override=new_cfg["ratio"])
 
         return JSONResponse(
             content={
@@ -1513,6 +1706,12 @@ def create_review_app(
                 rgba = pil_ov.convert("RGBA")
                 custom_overlay_file.parent.mkdir(parents=True, exist_ok=True)
                 rgba.save(custom_overlay_file, format="PNG")
+                if photo_storage.is_s3:
+                    photo_storage.write_bytes(
+                        _s3_key("assets", "custom_plate_overlay.png"),
+                        Path(custom_overlay_file).read_bytes(),
+                        content_type="image/png",
+                    )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=400, detail=f"Invalid image file for plate overlay: {exc}"
@@ -1524,18 +1723,11 @@ def create_review_app(
         cache_root = output_dir / "_covered_cache"
         if cache_root.exists():
             shutil.rmtree(cache_root, ignore_errors=True)
+        if photo_storage.is_s3:
+            photo_storage.delete_prefix(_s3_key("output", "_covered_cache"))
 
         # Re-render existing output photos with the new plate cover and active frame config
-        out_tree = _discover_folder_tree(output_dir, is_review=False)
-        for cid, items in out_tree.items():
-            target_d = output_dir if cid == "_root" else (output_dir / cid)
-            for item in items:
-                fname = item["filename"]
-                stem = Path(fname).stem
-                covered_bgr = _find_plate_covered_base(cid, stem)
-                if covered_bgr is not None:
-                    framed_pil = _render_with_active_frame_config(covered_bgr, car_id=cid)
-                    framed_pil.convert("RGB").save(target_d / fname, format="JPEG", quality=jpeg_quality)
+        _re_render_all_output_photos()
 
         return JSONResponse(
             content={
@@ -1551,17 +1743,29 @@ def create_review_app(
         nonlocal overlay_bgra
         if custom_overlay_file.exists():
             custom_overlay_file.unlink(missing_ok=True)
+        if photo_storage.is_s3:
+            photo_storage.delete_key(_s3_key("assets", "custom_plate_overlay.png"))
         overlay_bgra = load_overlay_rgba(overlay_path) if overlay_path.exists() else None
 
         cache_root = output_dir / "_covered_cache"
         if cache_root.exists():
             shutil.rmtree(cache_root, ignore_errors=True)
+        if photo_storage.is_s3:
+            photo_storage.delete_prefix(_s3_key("output", "_covered_cache"))
 
         return JSONResponse(content={"ok": True, "has_custom_overlay": False})
 
     @app.get("/media/plate-overlay")
     def media_plate_overlay(_user: str = Depends(verify_auth)) -> Response:
         """Serve the currently active license plate cover image (custom or default)."""
+        if photo_storage.is_s3:
+            custom_bytes = photo_storage.read_bytes(_s3_key("assets", "custom_plate_overlay.png"))
+            if custom_bytes:
+                return Response(
+                    content=custom_bytes,
+                    media_type="image/png",
+                    headers={"Cache-Control": "private, no-store"},
+                )
         active_p = custom_overlay_file if custom_overlay_file.exists() else overlay_path
         if active_p.exists():
             return Response(
@@ -1664,6 +1868,12 @@ def create_review_app(
                         out_file, format="JPEG", quality=jpeg_quality, subsampling=0
                     )
 
+        if photo_storage.is_s3:
+            _sync_local_dir_to_s3(car_inbox, f"inbox/{clean_cid}", remove_local=True)
+            _sync_local_dir_to_s3(car_out, f"output/{clean_cid}", remove_local=True)
+            _sync_local_dir_to_s3(car_rev, f"review/{clean_cid}", remove_local=True)
+            _sync_local_dir_to_s3(cache_dir, f"output/_covered_cache/{clean_cid}", remove_local=True)
+
         out_count = sum(1 for r in records if r.destination == "output")
         rev_count = sum(1 for r in records if r.destination == "review")
 
@@ -1752,8 +1962,11 @@ def create_review_app(
         _user: str = Depends(verify_auth),
     ) -> Response:
         """Serve authenticated 'Before' thumbnail (or full resolution) of a review image."""
-        img_path = _resolve_child_file(review_dir, car_id, filename)
-        bgr = load_image_bgr(img_path)
+        safe_car = _validate_path_segment(car_id)
+        safe_name = _validate_path_segment(filename)
+        bgr = _read_folder_bgr("review", safe_car, safe_name)
+        if bgr is None:
+            raise HTTPException(status_code=404, detail="Image not found.")
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         max_w = 0 if full else thumb_width
         jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=max_w, quality=jpeg_quality)
@@ -1772,15 +1985,18 @@ def create_review_app(
         _user: str = Depends(verify_auth),
     ) -> Response:
         """Serve authenticated 'After' framed preview of a review image using the pre-selected Frame config."""
-        img_path = _resolve_child_file(review_dir, car_id, filename)
-        image_bgr = load_image_bgr(img_path)
+        safe_car = _validate_path_segment(car_id)
+        safe_name = _validate_path_segment(filename)
+        image_bgr = _read_folder_bgr("review", safe_car, safe_name)
+        if image_bgr is None:
+            raise HTTPException(status_code=404, detail="Image not found.")
         dets = _get_detector().detect_array(image_bgr)
         if dets:
             processed_bgr = apply_plate_overlays(image_bgr, dets, settings, overlay_bgra).image_bgr
         else:
             processed_bgr = image_bgr
         composed_pil = _render_with_active_frame_config(
-            processed_bgr, car_id=car_id, ratio_override=ratio
+            processed_bgr, car_id=safe_car, ratio_override=ratio
         )
         max_w = 0 if full else thumb_width
         jpeg_bytes = _pil_to_jpeg_bytes(composed_pil, max_width=max_w, quality=jpeg_quality)
@@ -1800,26 +2016,29 @@ def create_review_app(
         _user: str = Depends(verify_auth),
     ) -> Response:
         """Serve or download a processed output image rendered with the pre-selected Frame config across any ratio."""
-        out_path = _resolve_child_file(output_dir, car_id, filename)
+        safe_car = _validate_path_segment(car_id)
+        safe_name = _validate_path_segment(filename)
         active_fcfg = _get_frame_config()
         effective_ratio = ratio or active_fcfg["ratio"]
 
-        covered_bgr = _find_plate_covered_base(car_id, out_path.stem)
+        covered_bgr = _find_plate_covered_base(safe_car, Path(safe_name).stem)
         if covered_bgr is not None:
             pil_img = _render_with_active_frame_config(
-                covered_bgr, car_id=car_id, ratio_override=effective_ratio
+                covered_bgr, car_id=safe_car, ratio_override=effective_ratio
             )
         else:
-            bgr = load_image_bgr(out_path)
+            bgr = _read_folder_bgr("output", safe_car, safe_name)
+            if bgr is None:
+                raise HTTPException(status_code=404, detail="Output image not found.")
             pil_img = _render_with_active_frame_config(
-                bgr, car_id=car_id, ratio_override=effective_ratio
+                bgr, car_id=safe_car, ratio_override=effective_ratio
             )
 
         max_w = 0 if (download or full) else thumb_width
         jpeg_bytes = _pil_to_jpeg_bytes(pil_img, max_width=max_w, quality=jpeg_quality)
         headers = {"Cache-Control": "private, no-store"}
         if download:
-            dl_name = f"{car_id}_{effective_ratio.replace(':', 'x')}_{filename}"
+            dl_name = f"{safe_car}_{effective_ratio.replace(':', 'x')}_{safe_name}"
             headers["Content-Disposition"] = f'attachment; filename="{dl_name}"'
         return Response(content=jpeg_bytes, media_type="image/jpeg", headers=headers)
 
@@ -1833,12 +2052,9 @@ def create_review_app(
     ) -> Response:
         """Export all processed photos for a Car ID as a ZIP archive using the pre-selected Frame config."""
         safe_car = _validate_path_segment(car_id)
-        target_dir = output_dir if safe_car == "_root" else (output_dir / safe_car)
-        if not target_dir.exists():
-            raise HTTPException(status_code=404, detail="Car output folder not found.")
-
-        imgs = list_supported_images(target_dir, supported_exts)
-        if not imgs:
+        out_tree = _discover_folder_tree(output_dir, is_review=False)
+        car_items = out_tree.get(safe_car, [])
+        if not car_items:
             raise HTTPException(status_code=404, detail="No processed images found for car.")
 
         active_fcfg = _get_frame_config()
@@ -1847,26 +2063,23 @@ def create_review_app(
         effective_template_style = template_style or active_fcfg["template_style"]
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for p in imgs:
-                covered_bgr = _find_plate_covered_base(safe_car, p.stem)
-                if covered_bgr is not None:
-                    pil_img = _render_with_active_frame_config(
-                        covered_bgr,
-                        car_id=safe_car,
-                        ratio_override=effective_ratio,
-                        fit_mode_override=effective_fit_mode,
-                        template_style_override=effective_template_style,
-                    )
-                else:
-                    pil_img = _render_with_active_frame_config(
-                        load_image_bgr(p),
-                        car_id=safe_car,
-                        ratio_override=effective_ratio,
-                        fit_mode_override=effective_fit_mode,
-                        template_style_override=effective_template_style,
-                    )
+            for item in car_items:
+                fname = item["filename"]
+                stem = Path(fname).stem
+                covered_bgr = _find_plate_covered_base(safe_car, stem)
+                if covered_bgr is None:
+                    covered_bgr = _read_folder_bgr("output", safe_car, fname)
+                if covered_bgr is None:
+                    continue
+                pil_img = _render_with_active_frame_config(
+                    covered_bgr,
+                    car_id=safe_car,
+                    ratio_override=effective_ratio,
+                    fit_mode_override=effective_fit_mode,
+                    template_style_override=effective_template_style,
+                )
                 img_bytes = _pil_to_jpeg_bytes(pil_img, max_width=0, quality=jpeg_quality)
-                zf.writestr(f"{p.stem}_{effective_ratio.replace(':', 'x')}.jpg", img_bytes)
+                zf.writestr(f"{stem}_{effective_ratio.replace(':', 'x')}.jpg", img_bytes)
 
         zip_filename = f"{safe_car}_{effective_ratio.replace(':', 'x')}_export.zip"
         return Response(
@@ -1910,10 +2123,13 @@ def create_review_app(
         user: str = Depends(verify_auth),
     ) -> JSONResponse:
         """Approve a review image: compose with pre-selected Frame config, write to output/, remove from review/."""
-        img_path = _resolve_child_file(review_dir, car_id, filename)
+        safe_car = _validate_path_segment(car_id)
+        safe_name = _validate_path_segment(filename)
         quad_pct = payload.get("quad_pct") if isinstance(payload, dict) else None
 
-        image_bgr = load_image_bgr(img_path)
+        image_bgr = _read_folder_bgr("review", safe_car, safe_name)
+        if image_bgr is None:
+            raise HTTPException(status_code=404, detail="Review image not found.")
         img_h, img_w = image_bgr.shape[:2]
         if quad_pct and len(quad_pct) == 4 and overlay_bgra is not None:
             pts = np.array(
@@ -1931,24 +2147,26 @@ def create_review_app(
             else:
                 processed_bgr = image_bgr
 
-        cache_f = output_dir / "_covered_cache" / car_id / f"{img_path.stem}.jpg"
-        cache_f.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(cache_f), processed_bgr)
+        stem = Path(safe_name).stem
+        _save_covered_cache_bgr(safe_car, stem, processed_bgr)
 
         active_fcfg = _get_frame_config()
         effective_ratio = ratio if (ratio and ratio != "website") else active_fcfg["ratio"]
         composed_pil = _render_with_active_frame_config(
-            processed_bgr, car_id=car_id, ratio_override=effective_ratio
+            processed_bgr, car_id=safe_car, ratio_override=effective_ratio
         )
 
-        target_dir = output_dir if car_id == "_root" else (output_dir / car_id)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        out_path = target_dir / f"{img_path.stem}.jpg"
-        composed_pil.convert("RGB").save(
-            out_path, format="JPEG", quality=jpeg_quality, subsampling=0
-        )
+        out_path = _save_output_pil(safe_car, f"{stem}.jpg", composed_pil)
 
-        img_path.unlink()
+        local_rev = (review_dir if safe_car == "_root" else (review_dir / safe_car)) / safe_name
+        local_rev.unlink(missing_ok=True)
+        if photo_storage.is_s3:
+            rev_key = (
+                _s3_key("review", safe_name)
+                if safe_car == "_root"
+                else _s3_key("review", safe_car, safe_name)
+            )
+            photo_storage.delete_key(rev_key)
 
         decisions = _load_json_dict(decisions_file)
         key = f"{car_id}/{filename}"
@@ -2005,37 +2223,10 @@ def create_review_app(
         _user: str = Depends(verify_auth),
     ) -> Response:
         """Serve authenticated original ('Before' plate removal) photo for any car in Gallery."""
-        safe_car = _validate_path_segment(car_id)
-        safe_name = _validate_path_segment(filename)
-        stem = Path(safe_name).stem
-
-        # Search inbox/<car_id>, review/<car_id>, data/test_photos, and output/<car_id>
-        search_dirs = [
-            inbox_dir if safe_car == "_root" else (inbox_dir / safe_car),
-            review_dir if safe_car == "_root" else (review_dir / safe_car),
-            Path(paths_cfg.get("input_dir", "data/test_photos")),
-            output_dir if safe_car == "_root" else (output_dir / safe_car),
-        ]
-        found_path: Path | None = None
-        for sdir in search_dirs:
-            if not sdir.exists():
-                continue
-            exact = sdir / safe_name
-            if exact.is_file():
-                found_path = exact
-                break
-            for ext in supported_exts:
-                cand = sdir / f"{stem}{ext}"
-                if cand.is_file():
-                    found_path = cand
-                    break
-            if found_path:
-                break
-
-        if found_path is None:
+        bgr = _find_original_bgr(car_id, filename)
+        if bgr is None:
             raise HTTPException(status_code=404, detail="Original image not found.")
 
-        bgr = load_image_bgr(found_path)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         max_w = 0 if full else thumb_width
         jpeg_bytes = _pil_to_jpeg_bytes(Image.fromarray(rgb), max_width=max_w, quality=jpeg_quality)
@@ -2059,12 +2250,9 @@ def create_review_app(
 
         covered_bgr = _find_plate_covered_base(safe_car, stem)
         if covered_bgr is None:
-            # Check review_dir or output_dir
-            for base_d in (review_dir, output_dir):
-                target_d = base_d if safe_car == "_root" else (base_d / safe_car)
-                cand = target_d / safe_name
-                if cand.is_file():
-                    bgr = load_image_bgr(cand)
+            for folder_n in ("review", "output"):
+                bgr = _read_folder_bgr(folder_n, safe_car, safe_name)
+                if bgr is not None:
                     dets = _get_detector().detect_array(bgr)
                     if dets:
                         covered_bgr = apply_plate_overlays(bgr, dets, settings, overlay_bgra).image_bgr
@@ -2123,6 +2311,13 @@ def create_review_app(
             if old_state.exists():
                 old_state.rename(new_state)
 
+            if photo_storage.is_s3:
+                for folder_n in ("output", "review", "inbox", "output/_covered_cache"):
+                    photo_storage.rename_prefix(
+                        _s3_key(folder_n, safe_car),
+                        _s3_key(folder_n, new_cid),
+                    )
+
         all_meta[new_cid] = {
             "plate_display": str(payload.get("plate_display", new_raw_id or new_cid)).strip(),
             "car_model": str(payload.get("car_model", existing_meta.get("car_model", ""))).strip(),
@@ -2171,6 +2366,21 @@ def create_review_app(
         if cache_f.is_file():
             cache_f.unlink()
 
+        if photo_storage.is_s3:
+            for folder_n in ("output", "review", "inbox"):
+                exact_key = _s3_key(folder_n, safe_f) if safe_c == "_root" else _s3_key(folder_n, safe_c, safe_f)
+                if photo_storage.delete_key(exact_key):
+                    removed += 1
+                for ext in supported_exts:
+                    cand_key = (
+                        _s3_key(folder_n, f"{stem}{ext}")
+                        if safe_c == "_root"
+                        else _s3_key(folder_n, safe_c, f"{stem}{ext}")
+                    )
+                    if photo_storage.delete_key(cand_key):
+                        removed += 1
+            photo_storage.delete_key(_s3_key("output", "_covered_cache", safe_c, f"{stem}.jpg"))
+
         return 1 if removed > 0 else 0
 
     def _delete_entire_car_group(cid: str) -> int:
@@ -2195,6 +2405,9 @@ def create_review_app(
             car_st = state_file.parent / f"images_{safe_c}.json"
             if car_st.exists():
                 car_st.unlink(missing_ok=True)
+            if photo_storage.is_s3:
+                for folder_n in ("output", "review", "inbox", "output/_covered_cache"):
+                    count += photo_storage.delete_prefix(_s3_key(folder_n, safe_c))
 
         all_meta = _load_json_dict(cars_meta_file)
         if safe_c in all_meta:
@@ -2268,6 +2481,30 @@ def create_review_app(
         safe_name = _validate_path_segment(filename)
         stem = Path(safe_name).stem
 
+        if photo_storage.is_s3:
+            for folder_n in ("inbox", "review", "output"):
+                exact_k = (
+                    _s3_key(folder_n, safe_name)
+                    if safe_car == "_root"
+                    else _s3_key(folder_n, safe_car, safe_name)
+                )
+                raw_b = photo_storage.read_bytes(exact_k)
+                if raw_b:
+                    bgr = _decode_bytes_bgr(raw_b)
+                    if bgr is not None:
+                        return bgr
+                for ext in supported_exts:
+                    cand_k = (
+                        _s3_key(folder_n, f"{stem}{ext}")
+                        if safe_car == "_root"
+                        else _s3_key(folder_n, safe_car, f"{stem}{ext}")
+                    )
+                    raw_b = photo_storage.read_bytes(cand_k)
+                    if raw_b:
+                        bgr = _decode_bytes_bgr(raw_b)
+                        if bgr is not None:
+                            return bgr
+
         search_dirs = [
             inbox_dir if safe_car == "_root" else (inbox_dir / safe_car),
             review_dir if safe_car == "_root" else (review_dir / safe_car),
@@ -2318,11 +2555,9 @@ def create_review_app(
             covered = _find_plate_covered_base(safe_car, stem)
             if covered is not None:
                 return covered
-            for base_d in (output_dir, review_dir):
-                target_d = base_d if safe_car == "_root" else (base_d / safe_car)
-                cand = target_d / safe_name
-                if cand.is_file():
-                    bgr = load_image_bgr(cand)
+            for folder_n in ("output", "review"):
+                bgr = _read_folder_bgr(folder_n, safe_car, safe_name)
+                if bgr is not None:
                     dets = _get_detector().detect_array(bgr)
                     if dets:
                         return apply_plate_overlays(bgr, dets, settings, overlay_bgra).image_bgr
@@ -2336,9 +2571,9 @@ def create_review_app(
                 covered = _find_plate_covered_base(cid, Path(first_f).stem)
                 if covered is not None:
                     return covered
-                cand = (output_dir if cid == "_root" else (output_dir / cid)) / first_f
-                if cand.is_file():
-                    return load_image_bgr(cand)
+                bgr = _read_folder_bgr("output", cid, first_f)
+                if bgr is not None:
+                    return bgr
 
         sample_candidates = list_supported_images(
             Path(paths_cfg.get("input_dir", "data/test_photos")), supported_exts
@@ -2538,25 +2773,29 @@ def create_review_app(
 
             stem = Path(safe_fname).stem
             rev_candidate = (review_dir if safe_car == "_root" else (review_dir / safe_car)) / safe_fname
-            was_in_review = rev_candidate.is_file()
+            rev_s3_key = (
+                _s3_key("review", safe_fname)
+                if safe_car == "_root"
+                else _s3_key("review", safe_car, safe_fname)
+            )
+            was_in_review = rev_candidate.is_file() or (
+                photo_storage.is_s3 and photo_storage.exists(rev_s3_key)
+            )
 
             if was_in_review or in_place or len(target_filenames) > 1 or remove_plate_cover:
                 out_name = f"{stem}.jpg"
             else:
                 out_name = f"{stem}_frame_{template_style}_{r_slug}.jpg"
 
-            out_path = target_dir / out_name
-            rendered_pil.convert("RGB").save(
-                out_path, format="JPEG", quality=jpeg_quality, subsampling=0
-            )
+            out_path = _save_output_pil(safe_car, out_name, rendered_pil)
 
             # Update cached base image (either with plate cover or with plate cover removed)
-            cache_f = output_dir / "_covered_cache" / safe_car / f"{Path(out_name).stem}.jpg"
-            cache_f.parent.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(str(cache_f), bgr)
+            _save_covered_cache_bgr(safe_car, Path(out_name).stem, bgr)
 
             if was_in_review:
                 rev_candidate.unlink(missing_ok=True)
+                if photo_storage.is_s3:
+                    photo_storage.delete_key(rev_s3_key)
                 key = f"{safe_car}/{safe_fname}"
                 decisions[key] = {
                     "status": "approved",

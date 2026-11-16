@@ -1,10 +1,12 @@
-# Caddyfile for Forest Wheel Photo Review Web App
-# Automatic HTTPS (Let's Encrypt / ZeroSSL) is enabled by default in Caddy for photos.forestwheel.com.
-# All routes on the backend require HTTP Basic Auth (FW_REVIEW_USER / FW_REVIEW_PASS);
-# static directories are never served directly by Caddy.
+# Caddyfile for Forest Wheel Photo Pipeline Web App
+# Automatic HTTPS (Let's Encrypt / ZeroSSL) is enabled by default in Caddy for plateremoval.forestwheel.com.
 
-photos.forestwheel.com {
+plateremoval.forestwheel.com {
     encode zstd gzip
+
+    request_body {
+        max_size 100MB
+    }
 
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
@@ -16,4 +18,3 @@ photos.forestwheel.com {
 
     reverse_proxy 127.0.0.1:8000
 }
-
