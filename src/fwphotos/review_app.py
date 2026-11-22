@@ -1834,39 +1834,92 @@ def create_review_app(
                 detail=f"No supported image files uploaded. Supported: {supported_exts}",
             )
 
-        car_state_json = state_file.parent / f"images_{clean_cid}.json"
-        records = run_pipeline(
-            input_dir=car_inbox,
-            output_dir=car_out,
-            review_dir=car_rev,
-            config_path=config_path,
-            state_file=car_state_json,
-            profile=profile_name,
-            force=True,
-            detector=_get_detector(),
-        )
-
-        # Also cache the plate-covered base image (using active custom or default plate cover)
-        # and compose the output photo using the pre-selected Frame configuration from the Frame page.
+        # Single-pass fail-safe processing (avoids duplicate YOLO inference & framing)
+        threshold = float(det_cfg.get("confidence_threshold", 0.40))
         active_fcfg = _get_frame_config()
         effective_ratio = ratio if ratio else active_fcfg["ratio"]
         cache_dir = output_dir / "_covered_cache" / clean_cid
         cache_dir.mkdir(parents=True, exist_ok=True)
-        for rec in records:
-            if rec.destination == "output":
-                src_p = car_inbox / rec.filename
-                if src_p.exists():
-                    bgr = load_image_bgr(src_p)
-                    dets = _get_detector().detect_array(bgr)
-                    ov = apply_plate_overlays(bgr, dets, settings, overlay_bgra)
-                    cv2.imwrite(str(cache_dir / f"{src_p.stem}.jpg"), ov.image_bgr)
-                    framed_pil = _render_with_active_frame_config(
-                        ov.image_bgr, car_id=clean_cid, ratio_override=effective_ratio
-                    )
-                    out_file = car_out / f"{src_p.stem}.jpg"
-                    framed_pil.convert("RGB").save(
-                        out_file, format="JPEG", quality=jpeg_quality, subsampling=0
-                    )
+        car_out.mkdir(parents=True, exist_ok=True)
+
+        car_state_json = state_file.parent / f"images_{clean_cid}.json"
+        car_state = _load_json_dict(car_state_json)
+        det = _get_detector()
+        records_payload: list[dict[str, Any]] = []
+        out_count = 0
+        rev_count = 0
+
+        for src_p in saved_files:
+            try:
+                bgr = load_image_bgr(src_p)
+                raw_dets = det.detect_array(bgr, min_conf=min(0.05, threshold))
+            except Exception as exc:  # noqa: BLE001
+                car_rev.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_p, car_rev / src_p.name)
+                reason = f"detection_error: {exc}"
+                car_state[src_p.name] = {"destination": "review", "reason": reason}
+                records_payload.append({
+                    "filename": src_p.name, "plates_found": 0, "confidence": 0.0,
+                    "overlay_mode": "none", "destination": "review", "reason": reason,
+                })
+                rev_count += 1
+                continue
+
+            if not raw_dets:
+                car_rev.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_p, car_rev / src_p.name)
+                car_state[src_p.name] = {"destination": "review", "reason": "no_plate_detected"}
+                records_payload.append({
+                    "filename": src_p.name, "plates_found": 0, "confidence": 0.0,
+                    "overlay_mode": "none", "destination": "review", "reason": "no_plate_detected",
+                })
+                rev_count += 1
+                continue
+
+            max_conf = max(d.confidence for d in raw_dets)
+            valid_dets = [d for d in raw_dets if d.confidence >= threshold]
+            if not valid_dets:
+                car_rev.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_p, car_rev / src_p.name)
+                reason = f"low_confidence ({max_conf:.4f} < {threshold:.4f})"
+                car_state[src_p.name] = {"destination": "review", "reason": reason}
+                records_payload.append({
+                    "filename": src_p.name, "plates_found": 0, "confidence": round(max_conf, 4),
+                    "overlay_mode": "none", "destination": "review", "reason": reason,
+                })
+                rev_count += 1
+                continue
+
+            ov = apply_plate_overlays(bgr, valid_dets, settings, overlay_bgra)
+            if ov.plates_covered < 1:
+                car_rev.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_p, car_rev / src_p.name)
+                reason = "overlay_failed (0_plates_covered)"
+                car_state[src_p.name] = {"destination": "review", "reason": reason}
+                records_payload.append({
+                    "filename": src_p.name, "plates_found": len(valid_dets), "confidence": round(max_conf, 4),
+                    "overlay_mode": "none", "destination": "review", "reason": reason,
+                })
+                rev_count += 1
+                continue
+
+            cv2.imwrite(str(cache_dir / f"{src_p.stem}.jpg"), ov.image_bgr)
+            framed_pil = _render_with_active_frame_config(
+                ov.image_bgr, car_id=clean_cid, ratio_override=effective_ratio
+            )
+            out_file = car_out / f"{src_p.stem}.jpg"
+            framed_pil.convert("RGB").save(
+                out_file, format="JPEG", quality=jpeg_quality, subsampling=0
+            )
+            car_state[src_p.name] = {"destination": "output", "reason": "ok"}
+            ov_mode = ov.modes[0] if getattr(ov, "modes", None) else "perspective"
+            records_payload.append({
+                "filename": src_p.name, "plates_found": ov.plates_covered, "confidence": round(max_conf, 4),
+                "overlay_mode": ov_mode, "destination": "output", "reason": "ok",
+            })
+            out_count += 1
+
+        _save_json_dict(car_state_json, car_state)
 
         if photo_storage.is_s3:
             _sync_local_dir_to_s3(car_inbox, f"inbox/{clean_cid}", remove_local=True)
@@ -1874,29 +1927,16 @@ def create_review_app(
             _sync_local_dir_to_s3(car_rev, f"review/{clean_cid}", remove_local=True)
             _sync_local_dir_to_s3(cache_dir, f"output/_covered_cache/{clean_cid}", remove_local=True)
 
-        out_count = sum(1 for r in records if r.destination == "output")
-        rev_count = sum(1 for r in records if r.destination == "review")
-
         return JSONResponse(
             content={
                 "ok": True,
                 "car_id": clean_cid,
                 "ratio": ratio,
                 "profile": profile_name,
-                "processed_count": len(records),
+                "processed_count": len(records_payload),
                 "output_count": out_count,
                 "review_count": rev_count,
-                "records": [
-                    {
-                        "filename": r.filename,
-                        "plates_found": r.plates_found,
-                        "confidence": r.max_confidence,
-                        "overlay_mode": r.overlay_mode,
-                        "destination": r.destination,
-                        "reason": r.reason,
-                    }
-                    for r in records
-                ],
+                "records": records_payload,
             }
         )
 

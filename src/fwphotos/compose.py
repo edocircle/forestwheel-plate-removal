@@ -257,13 +257,17 @@ def render_apple_frame_studio(
             centering=(cx, cy),
         )
     else:
-        # "Fit to frame": enlarged + Gaussian blurred copy of the same photo fills empty space
-        blurred_bg = ImageOps.fit(
+        # "Fit to frame": fast downscale-blur-upscale produces smooth bokeh in ~1/25th the CPU time
+        blur_scale = 0.20
+        small_w = max(64, int(round(box_w * blur_scale)))
+        small_h = max(64, int(round(box_h * blur_scale)))
+        small_bg = ImageOps.fit(
             photo_pil,
-            (box_w, box_h),
+            (small_w, small_h),
             method=Image.Resampling.BILINEAR,
             centering=(0.5, 0.5),
-        ).filter(ImageFilter.GaussianBlur(radius=int(round(32 * sc))))
+        ).filter(ImageFilter.GaussianBlur(radius=max(2, int(round(32 * sc * blur_scale)))))
+        blurred_bg = small_bg.resize((box_w, box_h), Image.Resampling.BICUBIC)
         # Slightly brighten/soften the blurred backdrop for Apple studio aesthetic
         soft_overlay = Image.new("RGB", (box_w, box_h), (255, 255, 255))
         viewport_img = Image.blend(blurred_bg, soft_overlay, alpha=0.14)

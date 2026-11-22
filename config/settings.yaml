@@ -14,7 +14,7 @@ detection:
   weights_path: "models/plate_yolov8n.pt"
   weights_url: "https://huggingface.co/Koushim/yolov8-license-plate-detection/resolve/main/best.pt"
   confidence_threshold: 0.40
-  max_inference_size: 1280
+  max_inference_size: 800
   device: "cpu"
   supported_extensions:
     - ".jpg"
