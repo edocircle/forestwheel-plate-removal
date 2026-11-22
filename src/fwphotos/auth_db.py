@@ -686,3 +686,4 @@ def exchange_google_oauth_code(
         return verify_google_id_token(id_token, expected_client_id=client_id)
 
     raise ValueError("Google OAuth response did not include valid user identity.")
+
